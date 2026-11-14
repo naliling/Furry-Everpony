@@ -1,0 +1,49 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 本地工具链与下载的二进制（Node 便携版、homeserver 安装包）
+.tools/
+
+# 构建产物
+dist/
+build/*
+!build/icon.png
+!build/icon.ico
+android/build/
+android/build-test/
+android/dist/
+dist-apk/
+*.idsig
+*.tsbuildinfo
+
+# 运行时数据
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+*.key
+
+# 环境与密钥
+.env
+.env.*
+!.env.example
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 临时文件
+*.log
+*.tmp
+
+# 打包产物（体积大，不进版本库）
+release/
+# 安卓构建中间产物（assets/web 是 vite 产物拷进来的，不入库）
+android/assets/
+android/build-local/
+android/keystore/

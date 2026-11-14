@@ -1,0 +1,679 @@
+/* effects.css —— 头像框、昵称字体、聊天背景、链接、资料卡照片墙
+   这一层最后加载，用来覆盖前面几层的默认样式。 */
+
+/* ---------- 消息里的链接 ---------- */
+.msg-link {
+  color: var(--accent, #4ea1ff);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+  cursor: pointer;
+  transition: color .15s ease, opacity .15s ease;
+}
+.msg-link:hover { opacity: .82; }
+
+/* ---------- 发送失败：可以点着重发 ---------- */
+.msg-failed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 92, 92, .45);
+  border-radius: 999px;
+  background: rgba(255, 92, 92, .12);
+  color: #ff7b7b;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
+}
+.msg-failed:hover { background: rgba(255, 92, 92, .22); transform: translateY(-1px); }
+
+/* ---------- 聊天背景 ---------- */
+.msg-list.has-chat-bg {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: local;
+  position: relative;
+}
+.msg-list.has-chat-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(6, 9, 16, .34), rgba(6, 9, 16, .18));
+  backdrop-filter: saturate(.92);
+  z-index: 0;
+}
+.msg-list.has-chat-bg > * { position: relative; z-index: 1; }
+
+/* ---------- 头像框（内置六款） ---------- */
+.avatar { position: relative; }
+
+html[data-avatar-frame='neon'] .avatar {
+  box-shadow: 0 0 0 2px rgba(96, 214, 255, .9), 0 0 16px rgba(96, 214, 255, .55);
+  border-radius: 50%;
+}
+html[data-avatar-frame='gold'] .avatar {
+  box-shadow: 0 0 0 2px rgba(255, 206, 112, .95), 0 0 14px rgba(255, 176, 32, .45);
+  border-radius: 50%;
+}
+html[data-avatar-frame='candy'] .avatar {
+  padding: 2px;
+  background: linear-gradient(135deg, #ff8ac4, #8a7bff 45%, #57e2ff);
+  border-radius: 50%;
+}
+html[data-avatar-frame='candy'] .avatar > img,
+html[data-avatar-frame='candy'] .avatar > .avatar-letter { border-radius: 50%; }
+html[data-avatar-frame='pixel'] .avatar {
+  box-shadow: 0 0 0 3px #0b1220, 0 0 0 5px #5ef2c7;
+  border-radius: 4px;
+}
+html[data-avatar-frame='pixel'] .avatar > img { border-radius: 2px; }
+html[data-avatar-frame='orbit'] .avatar::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px dashed rgba(150, 200, 255, .75);
+  animation: fe-orbit 9s linear infinite;
+  pointer-events: none;
+}
+@keyframes fe-orbit { to { transform: rotate(360deg); } }
+
+/* ---------- 昵称字体 ---------- */
+html[data-name-font='round'] .msg-name,
+html[data-name-font='round'] .conv-name,
+html[data-name-font='round'] .settings-profile-name,
+html[data-name-font='round'] .profile-name {
+  font-family: 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  letter-spacing: .2px;
+}
+html[data-name-font='serif'] .msg-name,
+html[data-name-font='serif'] .conv-name,
+html[data-name-font='serif'] .settings-profile-name,
+html[data-name-font='serif'] .profile-name {
+  font-family: 'Noto Serif SC', 'Songti SC', 'SimSun', Georgia, serif;
+}
+html[data-name-font='mono'] .msg-name,
+html[data-name-font='mono'] .conv-name,
+html[data-name-font='mono'] .settings-profile-name,
+html[data-name-font='mono'] .profile-name {
+  font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  letter-spacing: .3px;
+}
+html[data-name-font='bold'] .msg-name,
+html[data-name-font='bold'] .conv-name,
+html[data-name-font='bold'] .settings-profile-name,
+html[data-name-font='bold'] .profile-name {
+  font-weight: 800;
+  letter-spacing: .4px;
+}
+
+/* ---------- 设置页：聊天背景网格 ---------- */
+.bg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.bg-cell {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: 12px;
+  border: 1px solid var(--line, rgba(255, 255, 255, .12));
+  background: var(--panel-2, rgba(255, 255, 255, .04));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-dim, #93a0b8);
+  font-size: 12px;
+  transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.bg-cell:hover { transform: translateY(-2px); }
+.bg-cell.on { border-color: var(--accent, #4ea1ff); box-shadow: 0 0 0 2px rgba(78, 161, 255, .35); }
+.bg-pick { position: absolute; inset: 0; border: 0; padding: 0; background: none; cursor: pointer; }
+.bg-pick img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bg-del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+.bg-cell:hover .bg-del { opacity: 1; }
+.bg-add { border-style: dashed; cursor: pointer; }
+.bg-none { cursor: pointer; }
+
+/* ---------- 设置页：资料卡背景 + 照片墙 ---------- */
+.card-bg-preview {
+  margin-top: 4px;
+  height: 132px;
+  border-radius: 14px;
+  border: 1px dashed var(--line, rgba(255, 255, 255, .14));
+  background-size: cover;
+  background-position: center;
+  display: grid;
+  place-items: center;
+  color: var(--text-dim, #93a0b8);
+  font-size: 12px;
+}
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.photo-cell { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; }
+.photo-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+.photo-cell:hover .photo-del { opacity: 1; }
+
+/* ---------- 资料卡：背景 + 照片 ---------- */
+.profile-banner.has-bg {
+  background-size: cover;
+  background-position: center;
+  position: relative;
+}
+.profile-banner.has-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(6, 9, 16, .12), rgba(6, 9, 16, .5));
+  border-radius: inherit;
+  pointer-events: none;
+}
+.profile-banner.has-bg .profile-avatar,
+.profile-banner.has-bg .profile-glow { position: relative; z-index: 1; }
+
+.profile-photos { margin: 10px 0 4px; }
+.profile-photos-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim, #93a0b8);
+  margin-bottom: 6px;
+}
+.profile-photos .photo-cell { padding: 0; border: 0; background: none; cursor: zoom-in; }
+
+.photo-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 5200;
+  background: rgba(4, 6, 12, .86);
+  backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  padding: 4vh 4vw;
+  cursor: zoom-out;
+  animation: fe-fade .18s ease;
+}
+.photo-viewer img {
+  max-width: 100%;
+  max-height: 92vh;
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .6);
+  animation: fe-pop .2s ease;
+}
+@keyframes fe-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fe-pop { from { transform: scale(.94); opacity: .6; } to { transform: scale(1); opacity: 1; } }
+
+/* ---------- 设置页：危险操作 ---------- */
+.settings-danger {
+  border-color: rgba(255, 92, 92, .35) !important;
+  background: linear-gradient(180deg, rgba(255, 92, 92, .08), transparent 60%);
+}
+.settings-danger h3 { color: #ff7b7b; }
+.danger-note { color: #ff9b9b !important; }
+
+/* ---------- 侧栏 Bot 入口 ---------- */
+.rail-bot.on { color: var(--accent, #4ea1ff); }
+
+/* ---------- 聊天快捷浮层：默认完全隐藏，鼠标进聊天区才浮现 ----------
+   之前默认 0.32 不透明度，半透明的按钮组会压在消息气泡右侧，看着像残影。 */
+.chat-quick {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(12px);
+  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
+  border-color: color-mix(in srgb, var(--line) 70%, transparent);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .28);
+  transition: opacity 180ms var(--ease, ease), transform 180ms var(--ease, ease);
+}
+.chat-panel:hover .chat-quick,
+.chat-quick:focus-within,
+.chat-quick:hover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) translateX(0);
+}
+.chat-quick-item:focus-visible {
+  outline: 2px solid var(--accent, #4ea1ff);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-avatar-frame='orbit'] .avatar::after { animation: none; }
+  .bg-cell, .msg-failed { transition: none; }
+}
+
+/* ============================================================
+   v0.10.3 · 正在输入 / 合并转发 / 聊天背景入口 / 断线提示
+   这一层最后加载：只新增类和局部覆盖，不动上面的 .msg-link / .msg-failed /
+   .bg-grid / .photo-grid / .rail-bot / .msg-list.has-chat-bg。
+   ============================================================ */
+
+/* ---------- 顶栏断线 / 恢复提示条 ---------- */
+.net-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 5px 14px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  backdrop-filter: blur(16px) saturate(150%);
+  animation: fe-banner-in 260ms var(--ease, ease);
+}
+.net-banner.offline {
+  color: #ffd9a3;
+  background: linear-gradient(180deg, rgba(255, 168, 58, 0.24), rgba(255, 140, 40, 0.08));
+  box-shadow: 0 1px 0 rgba(255, 180, 80, 0.28);
+}
+.net-banner.ok {
+  color: #a9f3d2;
+  background: linear-gradient(180deg, rgba(61, 220, 151, 0.17), rgba(61, 220, 151, 0.05));
+  box-shadow: 0 1px 0 rgba(61, 220, 151, 0.22);
+}
+.net-banner.ok svg { color: var(--green); }
+.net-banner-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ffb347;
+  box-shadow: 0 0 0 0 rgba(255, 170, 60, 0.55);
+  animation: fe-net-pulse 1.7s ease-out infinite;
+}
+.net-banner-reason {
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 225, 180, 0.72);
+  font-weight: 400;
+}
+html[data-desktop='1'] .net-banner { top: 34px; }
+:root[data-theme='light'] .net-banner.offline {
+  color: #7d4a06;
+  background: linear-gradient(180deg, rgba(255, 184, 77, 0.32), rgba(255, 196, 108, 0.12));
+  box-shadow: 0 1px 0 rgba(160, 110, 20, 0.18);
+}
+:root[data-theme='light'] .net-banner.ok {
+  color: #0d6b45;
+  background: linear-gradient(180deg, rgba(61, 200, 140, 0.22), rgba(61, 200, 140, 0.07));
+}
+:root[data-theme='light'] .net-banner-reason { color: #8a5a14; }
+
+@keyframes fe-net-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 170, 60, 0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(255, 170, 60, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 170, 60, 0); }
+}
+@keyframes fe-banner-in {
+  from { opacity: 0; transform: translateY(-100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- 会话列表：对方正在输入 ---------- */
+.conv-item.typing .conv-name { color: var(--text-1); }
+.conv-preview.conv-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
+  font-weight: 600;
+}
+.conv-typing-text {
+  color: var(--green);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv-typing-dots {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2.5px;
+  flex: none;
+  height: 10px;
+}
+.conv-typing-dots i {
+  width: 4.5px;
+  height: 4.5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: fe-dot 1.05s ease-in-out infinite;
+}
+.conv-typing-dots i:nth-child(2) { animation-delay: 0.15s; }
+.conv-typing-dots i:nth-child(3) { animation-delay: 0.3s; }
+
+/* ---------- 聊天头部：3 个跳动点 + 昵称 ---------- */
+.chat-head-sub.typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
+}
+.chat-head-sub.typing .typing-dots { align-items: center; }
+.chat-head-sub.typing .typing-dots i {
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+}
+.chat-head-sub-text {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 聊天底部 typing 行 ---------- */
+.typing-line { color: var(--green); }
+.typing-line-text {
+  color: var(--green);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 合并转发消息卡片 v2 ---------- */
+.msg-merge {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: min(348px, 60vw);
+  max-width: 100%;
+  padding: 10px 12px 9px;
+  border-radius: 15px;
+  border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  box-shadow: var(--shadow-1);
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--dur, 180ms) var(--ease, ease),
+    border-color var(--dur, 180ms) var(--ease, ease),
+    box-shadow var(--dur, 180ms) var(--ease, ease);
+}
+.msg-merge:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--brand) 60%, transparent);
+  box-shadow: 0 12px 30px -14px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--brand-soft);
+}
+.msg-merge-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.msg-merge-icon {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+.msg-merge-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-1);
+  font-size: 0.84rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg-merge-count {
+  flex: none;
+  color: var(--text-3);
+  font-size: 0.68rem;
+}
+.msg-merge-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 9px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+}
+.msg-merge-line {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+.msg-merge-line b {
+  flex: none;
+  max-width: 5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-weight: 600;
+}
+.msg-merge-line-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg-merge-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--brand);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+/* ---------- 合并转发记录：头像 + 逐条转发 ---------- */
+.merge-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.merge-item-main {
+  flex: 1;
+  min-width: 0;
+}
+.merge-item-forward {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity var(--dur, 180ms) var(--ease, ease),
+    color var(--dur, 180ms) var(--ease, ease),
+    border-color var(--dur, 180ms) var(--ease, ease);
+}
+.merge-item:hover .merge-item-forward { opacity: 1; }
+.merge-item-forward:hover {
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 55%, transparent);
+  background: var(--brand-soft);
+}
+.merge-view-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  color: var(--text-3);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+/* ---------- 聊天背景面板 ---------- */
+.chatbg-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.chatbg-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  color: var(--text-2);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+.chatbg-tip svg { flex: none; margin-top: 2px; color: var(--brand); }
+.chatbg-panel .bg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 10px;
+}
+.chatbg-panel .bg-cell { aspect-ratio: 4 / 3; }
+.chatbg-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: 0.76rem;
+}
+.chatbg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chatbg-settings-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin-top: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--line-strong);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color var(--dur, 180ms) var(--ease, ease),
+    border-color var(--dur, 180ms) var(--ease, ease),
+    background var(--dur, 180ms) var(--ease, ease);
+}
+.chatbg-settings-link:hover {
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 55%, transparent);
+  background: var(--brand-soft);
+}
+.chatbg-drawer .sheet-body { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+
+/* ---------- 设置页：从聊天页跳过来时闪一下 ---------- */
+@keyframes fe-card-flash {
+  0% { box-shadow: 0 0 0 0 rgba(91, 140, 255, 0.42); border-color: var(--brand); }
+  55% { box-shadow: 0 0 0 6px rgba(91, 140, 255, 0.14); border-color: var(--brand); }
+  100% { box-shadow: 0 0 0 0 rgba(91, 140, 255, 0); }
+}
+.settings-card.flash {
+  animation: fe-card-flash 1.1s var(--ease, ease) 2;
+  border-color: color-mix(in srgb, var(--brand) 55%, transparent);
+}
+
+/* ---------- 手机 ---------- */
+@media (max-width: 779px) {
+  .net-banner {
+    padding: 4px 10px;
+    font-size: 0.74rem;
+  }
+  .net-banner-reason { max-width: 40vw; }
+  .msg-merge { width: min(286px, 72vw); padding: 9px 10px 8px; }
+  .msg-merge-line { font-size: 0.72rem; }
+  .typing-line { padding: 2px 14px 4px; }
+  .merge-item-forward { opacity: 0.8; }
+  /* 手机头部按钮太多会把「正在输入…」挤成省略号；通话还没开放，先收起来 */
+  .chat-head-call { display: none; }
+}
+
+
+/* ---------- 合并卡片：去掉外层气泡，避免双层框 ---------- */
+.msg-bubble.kind-merge {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+/* 记录查看弹窗的标题行：图标和标题靠左，条数靠右 */
+.merge-view-head {
+  justify-content: flex-start;
+  gap: 8px;
+}
+.merge-view-count { margin-left: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .net-banner,
+  .net-banner-dot,
+  .conv-typing-dots i,
+  .chat-head-sub.typing .typing-dots i,
+  .settings-card.flash { animation: none; }
+  .msg-merge,
+  .merge-item-forward,
+  .chatbg-settings-link { transition: none; }
+}

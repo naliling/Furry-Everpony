@@ -1,0 +1,67 @@
+{
+  "name": "furry-everpony",
+  "version": "2026.11.15.0.10.11",
+  "description": "自托管的即时通讯软件：号码即账号，好友即关系，Bot 是一等公民",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "server": "node server/index.js",
+    "web": "vite",
+    "build:web": "vite build",
+    "start": "electron .",
+    "dist": "vite build && electron-builder --win nsis",
+    "pack": "vite build && electron-builder --win --dir"
+  },
+  "dependencies": {
+    "fastify": "^5.12.8",
+    "ws": "^8.23.0",
+    "zod": "^4.6.7"
+  },
+  "author": "Furry Everpony",
+  "build": {
+    "appId": "dev.furryeverpony.app",
+    "productName": "Furry Everpony",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "server/**/*",
+      "dist/web/**/*",
+      "build/icon.ico",
+      "package.json"
+    ],
+    "asar": false,
+    "npmRebuild": false,
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Furry Everpony",
+      "deleteAppDataOnUninstall": false
+    },
+    "electronDist": "node_modules/electron/dist"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^45.3.1",
+    "electron-builder": "^26.18.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "vite": "^6.4.6"
+  }
+}
