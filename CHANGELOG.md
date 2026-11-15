@@ -1,3 +1,29 @@
+# v2026.11.15.0.10.13 — 2026-11-15
+
+## 加好友不再麻烦：自动通过 + 附近的人一键加
+
+用户反馈「测试拒绝 这很明显太麻烦 不知道的人加好友只会难上加难」，这次把加好友从「手抄邀请码 + 对方点同意 + 回连确认」压成一步。
+
+### 自动通过好友（默认开，可在「设置 → 实例互联」关掉）
+- 服务端 `server/federation.js` 新增 `autoAccept()` / `setAutoAccept()`，开关存 `instance_meta` 的 `auto_accept`。
+- `handleHandshake` 改为 async：对方用我的邀请码/二维码来加，直接 `notifyAccepted` 建立双向好友并回执 `friend: true`，不再插一条待处理申请；回执失败自动退回人工同意，不会把关系搞成单边。
+- `/api/federation/invite/accept` 返回值新增 `friend`，前端据此直接显示「已加为好友，现在就能聊天了」。
+- `/api/federation/settings` 支持 `autoAccept`，`/api/federation/info` 带出当前开关。
+- 手机端 `android/server-src/fe/local/Federation.java` 同步实现：`autoAccept()` / `setAutoAccept()`、握手内自动通过、`sendRequest` 与邀请码接口透出 `friend`、设置接口支持 `autoAccept`。
+
+### 附近的人一键加（同一个 Wi-Fi 不用任何输入）
+- 加好友弹窗把「局域网发现的实例」从「点一下填地址」升级成列出对方实例里的账号（昵称 + 号码 + 头像），点「加」直接发申请；开了自动通过就是立刻成为好友。
+- 实例没公布名单时，仍保留「点一下把地址填进去」的兜底。
+- 弹窗里新增自动通过状态条，一眼能看出别人加你要不要你点同意。
+
+### 测试
+- 后端联邦测试 `server/scripts/test-federation.mjs`：RAN 75 PASS 75 FAIL 0 ERR 0（新增自动通过用例：关掉开关测人工同意、打开开关测邀请码一步成为好友、不留下待处理申请、自己的邀请码 400）。
+- 安卓侧 `android/test/federation-test.mjs` 45/45、`android/test/local-api-test.mjs` 133/133。
+
+### 产物
+- 桌面单文件安装包 `FurryEverpony-2026.11.15.0.10.13.exe`：159,670,353 字节，sha256 `29cb160ddced7dab6776503b31eab2e887a983621a08ce9b4fccb8cf281dc08f`。
+- 安卓安装包 `FurryEverpony-2026.11.15.0.10.13.apk`：874,114 字节，versionCode 101013，sha256 `620ff7b98e231cddebf8cfd3bc37b3895672d1700542c10b81747bf646c47879`，签名证书 CN=Furry Everpony。
+- 全量测试：后端 11 套 RAN 435 PASS 435；安卓 5 套 RAN 266 PASS 266；合计 RAN 701 PASS 701 FAIL 0 ERR 0。
 # v2026.11.15.0.10.12 — 2026-11-15
 
 ## 手机版补上跨实例（联邦）能力：终于能和电脑版互相加好友

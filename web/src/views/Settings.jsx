@@ -678,7 +678,7 @@ function FederationCard({ token }) {
     setBusy(true);
     setErr('');
     try {
-      const out = await api('/api/federation/settings', { method: 'PATCH', token, body: { publicAddr: addr.trim() } });
+      const out = await api('/api/federation/settings', { method: 'PATCH', token, body: { publicAddr: addr.trim(), autoAccept: info?.autoAccept } });
       setInfo((old) => ({ ...(old || {}), publicAddr: out.publicAddr }));
       toast(addr.trim() ? '已保存对外地址' : '已清空对外地址', 'success');
     } catch (e) {
@@ -723,6 +723,28 @@ function FederationCard({ token }) {
       ) : (
         <p className="settings-hint">这台电脑没有探测到公网 IPv6。没有 IPv6 时，跨网络只能靠下面手填公网 IP 或 DDNS。</p>
       )}
+
+      <div className="settings-row">
+        <div className="settings-row-main">
+          <b><Icon name="check" size={16} /> 自动通过好友</b>
+          <span>{info?.autoAccept ? '开着：别人拿我的邀请码/二维码加我，直接成为好友，我不用点同意' : '关着：别人加我，我要在「新朋友」里点同意'}</span>
+        </div>
+        <Toggle
+          label="自动通过好友"
+          checked={!!info?.autoAccept}
+          onChange={async (next) => {
+            setInfo((old) => ({ ...(old || {}), autoAccept: next }));
+            try {
+              const out = await api('/api/federation/settings', { method: 'PATCH', token, body: { autoAccept: next } });
+              setInfo((old) => ({ ...(old || {}), autoAccept: out.autoAccept }));
+              toast(next ? '已开启自动通过' : '已关闭自动通过', 'success');
+            } catch (e) {
+              setInfo((old) => ({ ...(old || {}), autoAccept: !next }));
+              toast(e.message, 'error');
+            }
+          }}
+        />
+      </div>
 
       <div className="fed-row">
         <label className="field">

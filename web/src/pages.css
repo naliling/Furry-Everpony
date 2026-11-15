@@ -2848,6 +2848,7 @@ body,
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 .af-mine-row b {
@@ -2861,9 +2862,16 @@ body,
 }
 .af-mine-row > .btn {
   flex: 0 0 auto;
+  width: auto;
+  min-width: 74px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 .af-invite-code {
   width: 100%;
+  box-sizing: border-box;
+  display: block;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   border: 1px dashed color-mix(in srgb, var(--brand) 40%, var(--line));
@@ -2919,4 +2927,132 @@ body,
   .af-input {
     min-height: 74px;
   }
+}
+
+/* ---------- 弹窗底部按钮：横向排列，不再各自占满一行 ---------- */
+.modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+.modal-foot > .btn {
+  width: auto;
+  height: 40px;
+  margin-top: 0;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+.modal-foot > .btn-ghost {
+  color: var(--text-2);
+  border-color: color-mix(in srgb, var(--line) 90%, transparent);
+  background: transparent;
+}
+.modal-foot > .btn-ghost:hover {
+  color: var(--text-1);
+  border-color: color-mix(in srgb, var(--brand) 55%, var(--line));
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+}
+.modal-foot > .btn-primary {
+  min-width: 132px;
+  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--brand) 80%, transparent);
+}
+.modal-foot > .btn-primary:disabled {
+  box-shadow: none;
+}
+.modal-foot > .grow {
+  flex: 1 1 auto;
+}
+
+/* 窄屏（手机）：主按钮在最上面，整行宽，好点 */
+@media (max-width: 560px) {
+  .modal-foot {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .modal-foot > .btn {
+    width: 100%;
+    height: 44px;
+  }
+}
+
+/* 加好友弹窗里的邀请码框给足高度，别缩成一条缝 */
+.af-invite-code {
+  min-height: 62px;
+  max-height: 132px;
+}
+
+
+/* ---------- 加好友：附近的人一键加 / 自动通过提示 ---------- */
+.fed-nearby-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 12px);
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+}
+.fed-nearby-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+.fed-nearby-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-top: 1px dashed var(--line);
+}
+.fed-nearby-person-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.fed-nearby-person-main b { font-size: 0.88rem; }
+.fed-nearby-person-main span { font-size: 0.74rem; color: var(--text-dim); }
+.fed-nearby-person > .btn {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 56px;
+  padding: 6px 14px;
+  font-size: 0.8rem;
+}
+.fed-nearby-empty {
+  border: 1px dashed var(--line);
+  background: none;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.fed-nearby-empty:hover { color: var(--text); border-color: var(--brand); }
+.af-auto {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.76rem;
+  color: var(--text-dim);
+}
+.af-auto.on { color: var(--ok, #4ade80); }
+@media (max-width: 560px) {
+  .fed-nearby-person { padding: 8px 2px; }
+  .fed-nearby-person > .btn { min-width: 62px; height: 34px; }
 }

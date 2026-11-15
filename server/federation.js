@@ -128,6 +128,16 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
     return id;
   }
 
+  /** 自动通过：拿我邀请码/二维码来加我的人，直接成为好友（默认开，可在设置里关） */
+  function autoAccept() {
+    return meta('auto_accept') !== '0';
+  }
+
+  function setAutoAccept(on) {
+    setMeta('auto_accept', on ? '1' : '0');
+    return autoAccept();
+  }
+
   function publicAddr() {
     return meta('public_addr');
   }
@@ -184,6 +194,7 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
       publicAddr: publicAddr(),
       publicV6: v6Addresses(),
       myAddresses: myAddresses(),
+      autoAccept: autoAccept(),
     };
   }
 
@@ -203,6 +214,53 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
         "SELECT id, number, nickname, avatar, remote_addr, remote_instance, remote_secret FROM accounts WHERE number = ? AND type = 'remote'",
       )
       .get(number);
+  }
+
+  /** 记下某个远端号码的候选地址（对方实例可能报了一个连不上的地址，留几个备选） */
+  function setPeerAddrs(number, addrs) {
+    const list = rankAddrs(addrs);
+    if (list.length) setMeta('peer_addrs:' + number, JSON.stringify(list.slice(0, 6)));
+    return list;
+  }
+
+  function peerAddrs(number) {
+    try {
+      const raw = meta('peer_addrs:' + number);
+      const list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? rankAddrs(list) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** IPv4 排前面：同一个 Wi-Fi 下 IPv4 最稳，公网 IPv6 常因为临时地址/防火墙连不上 */
+  function rankAddrs(list) {
+    const seen = [];
+    for (const raw of list || []) {
+      const addr = normalizeAddr(raw);
+      if (addr && !seen.includes(addr)) seen.push(addr);
+    }
+    const v4 = seen.filter((a) => !a.startsWith('['));
+    const v6 = seen.filter((a) => a.startsWith('['));
+    return [...v4, ...v6];
+  }
+
+  /**
+   * 一个远端账号可能连得上的地址：历史候选 → 库里存的地址 → 本次请求的来源 IP → 局域网发现到的同实例地址。
+   * 以前只用 remote_addr 一个地址，对方报错（比如手机只报公网 IPv6）就整条链路死掉。
+   */
+  function candidatesFor(acc, hint = '') {
+    const list = [];
+    if (acc?.number) list.push(...peerAddrs(acc.number));
+    if (acc?.remote_addr) list.push(acc.remote_addr);
+    if (hint) list.push(hint);
+    const inst = acc?.remote_instance || '';
+    if (inst) {
+      for (const p of peers.values()) {
+        if (p.instanceId === inst) list.push(p.addr);
+      }
+    }
+    return rankAddrs(list);
   }
 
   function anyAccountByNumber(number) {
@@ -312,6 +370,7 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
       body: {
         from_instance: instanceId(),
         from_addr: myAddresses()[0] || '',
+        from_addrs: myAddresses().slice(0, 4),
         from_number: me.number,
         from_nickname: me.nickname,
         from_avatar: me.avatar || '',
@@ -327,11 +386,11 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
       };
       return { code: res.status || 502, error: map[res.status] || '对方实例连不上' };
     }
-    return { ok: true, pending: true };
+    return { ok: true, pending: true, friend: !!res.body?.friend, auto: !!res.body?.auto };
   }
 
   /** 收到别人的好友申请（对方实例调过来） */
-  function handleHandshake(body) {
+  async function handleHandshake(body, hint = '') {
     const number = String(body?.to_number || '');
     const fromNumber = String(body?.from_number || '');
     if (!/^[1-9]\d{4,11}$/.test(number) || !/^[1-9]\d{4,11}$/.test(fromNumber)) {
@@ -343,11 +402,19 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
     if (!joinable) return { code: 404, error: '没有这个号码' };
     if (fromNumber === number) return { code: 400, error: '不能加自己' };
 
+    const reported = [
+      ...(Array.isArray(body?.from_addrs) ? body.from_addrs : []),
+      body?.from_addr,
+      body?.from_addr_hint,
+      hint,
+    ];
+    const addrs = rankAddrs(reported);
+    setPeerAddrs(fromNumber, addrs);
     const mirror = upsertRemote({
       number: fromNumber,
       nickname: String(body?.from_nickname || ''),
       avatar: String(body?.from_avatar || ''),
-      addr: normalizeAddr(body?.from_addr) || normalizeAddr(body?.from_addr_hint),
+      addr: addrs[0] || '',
       instance: String(body?.from_instance || ''),
     });
     if (mirror.conflict) return { code: 409, error: '这个号码在本实例已被占用' };
@@ -356,6 +423,25 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
     const dup = db
       .prepare("SELECT id FROM friend_requests WHERE from_id = ? AND to_id = ? AND status = 'pending'")
       .get(mirror.id, target.id);
+
+    /* 自动通过：对方用我的邀请码/二维码来加，就不用再等我在界面上点「同意」。
+       这里直接把好友关系建立起来并回执对方，两边同时成为好友。 */
+    if (autoAccept()) {
+      const targetRow = db
+        .prepare('SELECT id, number, nickname, avatar, remote_addr, remote_instance, remote_secret FROM accounts WHERE id = ?')
+        .get(target.id);
+      const mirrorRow = db
+        .prepare('SELECT id, number, nickname, avatar, remote_addr, remote_instance, remote_secret FROM accounts WHERE id = ?')
+        .get(mirror.id);
+      const out = await notifyAccepted(mirrorRow, targetRow);
+      if (out.ok) {
+        if (dup) db.prepare("UPDATE friend_requests SET status = 'accepted' WHERE id = ?").run(dup.id);
+        log?.info?.('[fed] 自动通过 ' + fromNumber + ' → ' + number);
+        return { ok: true, friend: true, auto: true };
+      }
+      log?.warn?.('[fed] 自动通过失败，退回人工同意：' + (out.error || ''));
+    }
+
     if (dup) return { ok: true, pending: true };
     db.prepare(
       "INSERT INTO friend_requests (from_id, to_id, message, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
@@ -366,40 +452,51 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
 
   /** 本端同意了一个远端好友申请 → 回执对方实例，建立双向好友 */
   async function notifyAccepted(remoteAccount, me) {
-    const addr = normalizeAddr(remoteAccount.remote_addr);
-    if (!addr) return { ok: false, error: '缺少对方实例地址' };
     const secret = randomBytes(24).toString('hex');
-    const res = await callPeer(addr, '/api/federation/accept', {
-      method: 'POST',
-      body: {
-        instance_id: instanceId(),
-        secret,
-        from_number: me.number,
-        to_number: remoteAccount.number,
-        nickname: me.nickname,
-        avatar: me.avatar || '',
-        addr: myAddresses()[0] || '',
-      },
-    });
-    if (!res.ok) return { ok: false, error: '对方实例没连上，好友还没建立成功' };
-    db.prepare('UPDATE accounts SET remote_secret = ? WHERE id = ?').run(secret, remoteAccount.id);
-    makeFriends(me.id, remoteAccount.id);
-    return { ok: true };
+    const payload = {
+      instance_id: instanceId(),
+      secret,
+      from_number: me.number,
+      to_number: remoteAccount.number,
+      nickname: me.nickname,
+      avatar: me.avatar || '',
+      addr: myAddresses()[0] || '',
+      addrs: myAddresses().slice(0, 4),
+    };
+    const cands = candidatesFor(remoteAccount);
+    if (!cands.length) return { ok: false, error: '缺少对方实例地址' };
+    const tried = [];
+    for (const addr of cands) {
+      const res = await callPeer(addr, '/api/federation/accept', { method: 'POST', body: payload, timeout: 5000 });
+      if (res.ok) {
+        db.prepare('UPDATE accounts SET remote_secret = ?, remote_addr = ? WHERE id = ?').run(secret, addr, remoteAccount.id);
+        setPeerAddrs(remoteAccount.number, [addr, ...cands]);
+        makeFriends(me.id, remoteAccount.id);
+        log?.info?.('[fed] 好友建立成功 ' + me.number + ' ↔ ' + remoteAccount.number + ' @ ' + addr);
+        return { ok: true, addr };
+      }
+      tried.push(addr + (res.status ? '(' + res.status + ')' : ''));
+    }
+    log?.warn?.('[fed] 好友回执失败 ' + remoteAccount.number + ' 试过 ' + tried.join(', '));
+    return { ok: false, error: '对方实例没连上（试过 ' + cands.length + ' 个地址：' + cands.join(' / ') + '）' };
   }
 
   /** 对方实例回执：加好友成功 */
-  function handleAccept(body) {
+  function handleAccept(body, hint = '') {
     const number = String(body?.from_number || '');
     const toNumber = String(body?.to_number || '');
     const secret = String(body?.secret || '');
     if (!number || !secret) return { code: 400, error: '参数不全' };
     const meRow = anyAccountByNumber(toNumber);
     if (!meRow) return { code: 404, error: '没有这个号码' };
+    const reported = [...(Array.isArray(body?.addrs) ? body.addrs : []), body?.addr, hint];
+    const addrs = rankAddrs(reported);
+    setPeerAddrs(number, addrs);
     const mirror = upsertRemote({
       number,
       nickname: String(body?.nickname || ''),
       avatar: String(body?.avatar || ''),
-      addr: normalizeAddr(body?.addr) || '',
+      addr: addrs[0] || '',
       instance: String(body?.instance_id || ''),
     });
     if (mirror.conflict) return { code: 409, error: '这个号码在本实例已被占用' };
@@ -450,7 +547,7 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
 
   /** 本地发出一条消息后，把它塞进投递队列 */
   function enqueue(convId, me, peer, msg) {
-    const addr = normalizeAddr(peer.remote_addr);
+    const addr = candidatesFor(peer)[0] || normalizeAddr(peer.remote_addr);
     if (!addr || !peer.remote_secret) return { ok: false, error: '远端好友缺少地址或密钥' };
     db.prepare(
       `INSERT INTO federation_outbox
@@ -484,6 +581,12 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
         continue;
       }
       const attempts = row.attempts + 1;
+      // 对方地址可能变了（换了 Wi-Fi / IPv6 临时地址过期）：换一个候选地址再投
+      const alt = candidatesFor({ number: row.to_number, remote_addr: row.to_addr }).find((a) => a !== row.to_addr);
+      if (alt) {
+        db.prepare('UPDATE federation_outbox SET to_addr = ? WHERE id = ?').run(alt, row.id);
+        log?.info?.('[fed] 投递改地址 ' + row.to_number + ' → ' + alt);
+      }
       if (attempts >= MAX_ATTEMPTS) {
         db.prepare('DELETE FROM federation_outbox WHERE id = ?').run(row.id);
         log?.warn?.('[fed] 投递放弃 ' + row.to_number + ' → ' + row.to_addr);
@@ -601,6 +704,8 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
 
   return {
     instanceId,
+    autoAccept,
+    setAutoAccept,
     publicAddr,
     setPublicAddr,
     myAddresses,

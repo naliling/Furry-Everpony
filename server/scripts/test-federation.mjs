@@ -71,6 +71,12 @@ try {
   check('B 地址写法容错', setB.status === 200 && setB.data.publicAddr === addrB, JSON.stringify(setB.data));
   check('非法地址 400', (await callA('PATCH', '/api/federation/settings', { token: A, body: { publicAddr: '不是地址' } })).status === 400);
 
+  /* 默认是自动通过，人工同意流程要先把开关关掉才测得到 */
+  const autoOffA = await callA('PATCH', '/api/federation/settings', { token: A, body: { autoAccept: false } });
+  check('A 能关掉自动通过', autoOffA.status === 200 && autoOffA.data.autoAccept === false, JSON.stringify(autoOffA.data));
+  const autoOffB = await callB('PATCH', '/api/federation/settings', { token: B, body: { autoAccept: false } });
+  check('B 能关掉自动通过', autoOffB.status === 200 && autoOffB.data.autoAccept === false, JSON.stringify(autoOffB.data));
+
   const infoA = await callA('GET', '/api/federation/info', { token: A });
   check('info 有 instanceId', typeof infoA.data.instanceId === 'string' && infoA.data.instanceId.length === 32);
   check('info 有端口', infoA.data.port > 0);
@@ -237,6 +243,26 @@ try {
 
   const v6info = await callA('GET', '/api/federation/info', { token: A });
   check('info 带 publicV6 与 publicV6Urls 字段', Array.isArray(v6info.data.publicV6) && Array.isArray(v6info.data.publicV6Urls));
+
+  console.log('自动通过（邀请码/二维码免同意）');
+  /* 前面人工流程已经让两边成了好友，先删掉，才能测「用邀请码一步成为好友」 */
+  await callA('DELETE', '/api/friends/30002', { token: A });
+  await callB('DELETE', '/api/friends/30001', { token: B });
+  const autoOn = await callA('PATCH', '/api/federation/settings', { token: A, body: { autoAccept: true } });
+  check('A 打开自动通过', autoOn.status === 200 && autoOn.data.autoAccept === true, JSON.stringify(autoOn.data));
+  const inviteA = await callA('GET', '/api/federation/invite', { token: A });
+  check('自动通过时仍能生成邀请码', inviteA.status === 200 && !!inviteA.data.code, JSON.stringify(inviteA.data).slice(0, 200));
+  /* B 用 A 的邀请码加 A：A 侧自动通过，两边立刻是好友，B 这次请求直接返回 friend=true */
+  const viaCode = await callB('POST', '/api/federation/invite/accept', { token: B, body: { code: inviteA.data.code } });
+  check('用邀请码一步加成功', viaCode.status === 200 && viaCode.data.friend === true, JSON.stringify(viaCode.data).slice(0, 300));
+  const friendsB2 = await callB('GET', '/api/friends', { token: B });
+  check('B 立刻在好友列表里看到 A', (friendsB2.data.friends || []).some((f) => f.number === '30001'), JSON.stringify((friendsB2.data.friends || []).map((f) => f.number)));
+  const friendsA2 = await callA('GET', '/api/friends', { token: A });
+  check('A 侧也立刻是好友', (friendsA2.data.friends || []).some((f) => f.number === '30002'));
+  const reqsB = await callB('GET', '/api/friends/requests', { token: B });
+  check('自动通过不留下待处理申请', !(reqsB.data.incoming || []).some((r) => r.number === '30001' && r.status === 'pending'));
+  const selfCode = await callA('POST', '/api/federation/invite/accept', { token: A, body: { code: inviteA.data.code } });
+  check('自己的邀请码 400', selfCode.status === 400);
 } catch (err) {
   failures.push('异常: ' + err.message);
   console.error(err);

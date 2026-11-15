@@ -251,6 +251,15 @@ public final class Federation {
     metaSet("public_addr", clean);
   }
 
+  /** 自动通过：拿我邀请码/二维码来加我的人直接成为好友，不用我在界面上点同意（默认开） */
+  public boolean autoAccept() {
+    return !"0".equals(metaGet("auto_accept"));
+  }
+
+  public void setAutoAccept(boolean on) {
+    metaSet("auto_accept", on ? "1" : "0");
+  }
+
   public String instanceId() {
     String id = metaGet("instance_id");
     if (!id.isEmpty()) return id;
@@ -301,6 +310,7 @@ public final class Federation {
     m.put("publicAddr", publicAddr());
     m.put("publicV6", new ArrayList<Object>(v6Addresses()));
     m.put("myAddresses", new ArrayList<Object>(myAddresses()));
+    m.put("autoAccept", Boolean.valueOf(autoAccept()));
     m.put("local", Boolean.TRUE);
     return m;
   }
@@ -568,6 +578,9 @@ public final class Federation {
       if (Boolean.TRUE.equals(r.body.get("already"))) {
         res.put("already", Boolean.TRUE);
       }
+      if (Boolean.TRUE.equals(r.body.get("friend"))) {
+        res.put("friend", Boolean.TRUE);
+      }
       return res;
     }
     String msg = jsonStr(r.body, "error");
@@ -609,6 +622,16 @@ public final class Federation {
       res.put("ok", Boolean.TRUE);
       res.put("pending", Boolean.TRUE);
       return res;
+    }
+    /* 自动通过：对方拿我的邀请码/二维码来加，就不用再等我在手机上点「同意」 */
+    if (autoAccept()) {
+      Map<String, Object> acc = notifyAccepted(mirror, target);
+      if (Boolean.TRUE.equals(acc.get("ok"))) {
+        res.put("ok", Boolean.TRUE);
+        res.put("friend", Boolean.TRUE);
+        res.put("auto", Boolean.TRUE);
+        return res;
+      }
     }
     Map<String, Object> row = out();
     row.put("id", Long.valueOf(api.nextIdOf("friend_requests")));
@@ -1208,6 +1231,7 @@ public final class Federation {
               out.put("requestError", jsonStr(reqOut, "error"));
             } else {
               out.put("requested", Boolean.TRUE);
+              if (Boolean.TRUE.equals(reqOut.get("friend"))) out.put("friend", Boolean.TRUE);
             }
             res.json(out);
             return;
@@ -1224,15 +1248,21 @@ public final class Federation {
         Map<String, Object> me = api.requireMeOf(req, res);
         if (me == null) return;
         Map<String, Object> body = req.json();
-        String raw = str(body.get("publicAddr")).trim();
-        if (!raw.isEmpty() && normalizeAddr(raw).isEmpty()) {
-          res.error(400, "地址格式不对，示例：1.2.3.4:7788");
-          return;
+        if (body.get("autoAccept") != null) {
+          setAutoAccept(Boolean.TRUE.equals(body.get("autoAccept")) || "true".equals(String.valueOf(body.get("autoAccept"))));
         }
-        setPublicAddr(raw);
+        if (body.get("publicAddr") != null) {
+          String raw = str(body.get("publicAddr")).trim();
+          if (!raw.isEmpty() && normalizeAddr(raw).isEmpty()) {
+            res.error(400, "地址格式不对，示例：1.2.3.4:7788");
+            return;
+          }
+          setPublicAddr(raw);
+        }
         Map<String, Object> out = out();
         out.put("ok", Boolean.TRUE);
         out.put("publicAddr", publicAddr());
+        out.put("autoAccept", Boolean.valueOf(autoAccept()));
         res.json(out);
       }
     });

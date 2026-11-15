@@ -89,6 +89,30 @@ export function AddFriendModal({ token, onClose, onChanged }) {
   const myAddr = info?.publicAddr || info?.myAddresses?.[0] || info?.lanUrls?.[0] || '';
   const target = parseTarget(input);
 
+  const addNearby = async (inst, person) => {
+    if (busy) return;
+    setBusy(true);
+    setErr('');
+    setDone(null);
+    try {
+      const out = await api('/api/federation/request', {
+        method: 'POST',
+        token,
+        body: { addr: inst.addr, number: person.number, message: message.trim() || '在同一个 Wi-Fi 下发现你' },
+      });
+      onChanged?.();
+      setDone({
+        name: person.nickname || person.number,
+        number: person.number,
+        text: out.friend ? '已加为好友，现在就能聊天了' : '好友申请已发出，等对方同意',
+      });
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const copy = async (text, label) => {
     const ok = await copyText(text);
     if (ok) toast(label + '已复制', 'success');
@@ -116,7 +140,9 @@ export function AddFriendModal({ token, onClose, onChanged }) {
         const data = await api('/api/federation/invite/accept', { method: 'POST', token, body: { code: target.code } });
         const acc = data.account || {};
         onChanged?.();
-        if (data.requested) {
+        if (data.friend) {
+          setDone({ name: acc.nickname || acc.number, number: acc.number, text: '已加为好友，现在就能聊天了' });
+        } else if (data.requested) {
           setDone({ name: acc.nickname || acc.number, number: acc.number, text: '已向对方发出好友申请，同意后就能聊天' });
         } else {
           setFound({ ...data, addr: data.addr });
@@ -186,6 +212,10 @@ export function AddFriendModal({ token, onClose, onChanged }) {
           {invite?.code ? <button type="button" className="btn btn-primary btn-sm" onClick={() => copy(invite.code, '邀请码')}><Icon name="copy" size={14} /> 复制</button> : null}
         </div>
         {invite?.code ? <textarea className="af-invite-code" readOnly rows={2} value={invite.code} onFocus={(e) => e.target.select()} /> : null}
+        <div className={'af-auto ' + (info?.autoAccept ? 'on' : '')}>
+          <Icon name={info?.autoAccept ? 'check' : 'info'} size={14} />
+          <span>{info?.autoAccept ? '已开启自动通过：拿我的邀请码/二维码加我的人直接成为好友，不用我点同意' : '自动通过已关闭：别人加我要我在「新朋友」里点同意'}</span>
+        </div>
       </div>
 
       <label className="field">
@@ -207,13 +237,33 @@ export function AddFriendModal({ token, onClose, onChanged }) {
 
       {nearby.length ? (
         <div className="fed-nearby">
-          <span className="field-label">同一个 Wi-Fi 下发现 {nearby.length} 个实例，点一下自动填地址</span>
+          <span className="field-label">同一个 Wi-Fi 下的 {nearby.length} 个实例，点「加」直接加好友</span>
           {nearby.map((item) => (
-            <button type="button" key={item.instanceId} className="fed-nearby-item" onClick={() => { setInput(item.addr + ' '); setErr(''); setDone(null); }}>
-              <Icon name="wifi" size={15} />
-              <span className="fed-nearby-addr">{item.addr}</span>
-              <span className="fed-nearby-meta">{item.version || ''}</span>
-            </button>
+            <div className="fed-nearby-card" key={item.instanceId}>
+              <div className="fed-nearby-head">
+                <Icon name="wifi" size={15} />
+                <span className="fed-nearby-addr">{item.addr}</span>
+                <span className="fed-nearby-meta">{item.version || ''}</span>
+              </div>
+              {(item.numbers || []).length ? (
+                (item.numbers || []).map((person) => (
+                  <div className="fed-nearby-person" key={person.number}>
+                    <Avatar number={person.number} nickname={person.nickname} avatar={person.avatar} size={30} />
+                    <div className="fed-nearby-person-main">
+                      <b>{person.nickname || person.number}</b>
+                      <span>{person.number}{person.type === 'bot' ? ' · Bot' : ''}</span>
+                    </div>
+                    <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => addNearby(item, person)}>
+                      加
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <button type="button" className="fed-nearby-empty" onClick={() => { setInput(item.addr + ' '); setErr(''); setDone(null); }}>
+                  这个实例还没公布名单，点一下把地址填进去
+                </button>
+              )}
+            </div>
           ))}
         </div>
       ) : null}

@@ -59,7 +59,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.15.0.10.12';
+const VERSION = '2026.11.15.0.10.13';
 
 const NUMBER_RE = /^[1-9]\d{4,11}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 5–12 位数字，且不能以 0 开头');
@@ -1316,7 +1316,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     if (from && from.type === 'remote') {
       // 跨实例：先让对方实例那边也建立好友，成功了再落本地，避免单边好友
       const mirror = db
-        .prepare('SELECT id, number, remote_addr, remote_secret FROM accounts WHERE id = ?')
+        .prepare('SELECT id, number, remote_addr, remote_instance, remote_secret FROM accounts WHERE id = ?')
         .get(row.from_id);
       const out = await fed.notifyAccepted(mirror, accountById(row.to_id));
       if (!out.ok) return reply.code(502).send({ error: out.error || '对方实例没连上' });
@@ -2918,6 +2918,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
           tried: invite.addrs.length,
           requested: !reqOut.error,
           requestError: reqOut.error || '',
+          friend: !!reqOut.friend,
         };
       }
       last = out;
@@ -2932,9 +2933,15 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
   app.patch('/api/federation/settings', async (req, reply) => {
     const me = requireAuth(req, reply);
     if (!me) return;
-    const raw = String((req.body || {}).publicAddr ?? '').trim();
-    if (raw && !normalizeAddr(raw)) return reply.code(400).send({ error: '地址格式不对，示例：1.2.3.4:7788' });
-    return { ok: true, publicAddr: fed.setPublicAddr(raw) };
+    const body = req.body || {};
+    let autoAccept = fed.autoAccept();
+    if (body.autoAccept !== undefined) autoAccept = fed.setAutoAccept(!!body.autoAccept);
+    if (body.publicAddr !== undefined) {
+      const raw = String(body.publicAddr ?? '').trim();
+      if (raw && !normalizeAddr(raw)) return reply.code(400).send({ error: '地址格式不对，示例：1.2.3.4:7788' });
+      return { ok: true, publicAddr: fed.setPublicAddr(raw), autoAccept };
+    }
+    return { ok: true, publicAddr: fed.publicAddr(), autoAccept };
   });
 
   app.get('/api/federation/nearby', async (req, reply) => {
@@ -3010,13 +3017,13 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     if (!handshakeAllowed(String(req.ip || 'unknown'))) {
       return reply.code(429).send({ error: '太频繁了' });
     }
-    const out = fed.handleHandshake(req.body || {});
+    const out = await fed.handleHandshake(req.body || {}, String(req.ip || ''));
     if (out.error) return reply.code(out.code || 400).send({ error: out.error });
     return out;
   });
 
   app.post('/api/federation/accept', async (req, reply) => {
-    const out = fed.handleAccept(req.body || {});
+    const out = fed.handleAccept(req.body || {}, String(req.ip || ''));
     if (out.error) return reply.code(out.code || 400).send({ error: out.error });
     return out;
   });

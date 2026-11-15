@@ -47,3 +47,6 @@ release/
 android/assets/
 android/build-local/
 android/keystore/
+
+# gh/git 本地状态
+.local/
