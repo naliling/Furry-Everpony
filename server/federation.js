@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import dgram from 'node:dgram';
+import { normalizeRelayUrl } from './relay-client.js';
 
 /**
  * 实例互联（federation）
@@ -66,8 +67,12 @@ export function parseInvite(code) {
     const addr = normalizeAddr(item);
     if (addr && !addrs.includes(addr)) addrs.push(addr);
   }
-  if (!addrs.length) return { error: '邀请码里没有可用的地址' };
-  return { number, nickname: String(obj.k || ''), addrs, expiresAt };
+  /* v1 里新增两个可选字段：i = 实例 ID，r = 中继地址。
+     老版本客户端不认识也不会坏（只读 a/n/k/e），新客户端直连不上时可以走中继。 */
+  const instanceId = String(obj.i || '');
+  const relayUrl = normalizeRelayUrl(obj.r);
+  if (!addrs.length && !(instanceId && relayUrl)) return { error: '邀请码里没有可用的地址' };
+  return { number, nickname: String(obj.k || ''), addrs, expiresAt, instanceId, relay: relayUrl };
 }
 
 function addrOf(addr, path) {
@@ -94,7 +99,15 @@ async function callPeer(addr, path, { method = 'GET', body, headers = {}, timeou
     }
     return { ok: res.ok, status: res.status, body: json };
   } catch (err) {
-    return { ok: false, status: 0, body: null, error: err?.name === 'AbortError' ? '超时' : err?.message || '连不上' };
+    /* 底层报错（fetch failed / ECONNREFUSED）直接给用户看等于没说，这里翻成人话 */
+    const name = String(err?.name || '');
+    const raw = String(err?.message || '');
+    let friendly = '连不上（原因不明）';
+    if (name === 'AbortError') friendly = '连不上（对方没在 ' + Math.round(timeout / 1000) + ' 秒内应答）';
+    else if (/ENOTFOUND|EAI_AGAIN/i.test(raw)) friendly = '连不上（地址解析失败）';
+    else if (/ECONNREFUSED/i.test(raw)) friendly = '连不上（对方这个端口没开）';
+    else if (/ECONNRESET|fetch failed|network|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH/i.test(raw)) friendly = '连不上（网络不通，可能被防火墙拦了）';
+    return { ok: false, status: 0, body: null, error: friendly };
   } finally {
     clearTimeout(timer);
   }
@@ -102,6 +115,13 @@ async function callPeer(addr, path, { method = 'GET', body, headers = {}, timeou
 
 export function createFederation({ db, log, port = DEFAULT_PORT, version = '', lanUrls = () => [], publicV6 = () => [] }) {
   const peers = new Map(); // instanceId → { instanceId, addr, port, version, lastSeen, numbers, numbersAt }
+  /* 中继客户端由 index.js 注入（不配中继地址时它是空转的，行为和以前完全一样） */
+  let relay = null;
+
+  function setRelay(client) {
+    relay = client || null;
+    return relay;
+  }
 
   let worker = null;
   let discovery = null;
@@ -177,11 +197,15 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
     for (const addr of v6Addresses()) if (!list.includes(addr)) list.push(addr);
     /* 局域网地址放最后：同一个 Wi-Fi 下（手机连家里路由器）也能靠邀请码直接加，不要求有公网 IPv6 */
     for (const addr of myAddresses()) if (!list.includes(addr)) list.push(addr);
-    if (!list.length) return null;
+    const relayUrl = relay?.url?.() || '';
+    /* 有中继时，即使一个能被连上的地址都没有（家用宽带没有公网地址、也没在同一 Wi-Fi），
+       邀请码依然可用：对方会通过中继把申请排队投给我，我上线后自己拉。 */
+    if (!list.length && !relayUrl) return null;
     const expiresAt = Date.now() + INVITE_TTL;
-    const payload = { v: 1, a: list, n: me.number, k: String(me.nickname || ''), e: expiresAt };
+    const payload = { v: 1, a: list, n: me.number, k: String(me.nickname || ''), e: expiresAt, i: instanceId() };
+    if (relayUrl) payload.r = relayUrl;
     const code = INVITE_PREFIX + Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-    return { code, expiresAt, addrs: list };
+    return { code, expiresAt, addrs: list, relay: relayUrl, instanceId: instanceId() };
   }
 
   function info(boundToLan) {
@@ -360,33 +384,54 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
     };
   }
 
-  /** 发起跨实例好友申请 */
-  async function sendRequest(me, addr, number, message) {
+  /**
+   * 发起跨实例好友申请。
+   * 先直连（同一个 Wi-Fi / 有公网地址时最快）；直连不上就走中继排队 ——
+   * 中继只是把申请存下来，对方下次上线自己来拉，所以**不要求两边同时在线**。
+   */
+  async function sendRequest(me, addr, number, message, opts = {}) {
     const clean = normalizeAddr(addr);
-    if (!clean) return { code: 400, error: '实例地址格式不对' };
+    const knownInstance =
+      String(opts.instanceId || '') || String(remoteAccountByNumber(number)?.remote_instance || '');
+    if (!clean && !knownInstance) return { code: 400, error: '实例地址格式不对' };
     if (me.number === number) return { code: 400, error: '不能加自己' };
-    const res = await callPeer(clean, '/api/federation/handshake', {
-      method: 'POST',
-      body: {
-        from_instance: instanceId(),
-        from_addr: myAddresses()[0] || '',
-        from_addrs: myAddresses().slice(0, 4),
-        from_number: me.number,
-        from_nickname: me.nickname,
-        from_avatar: me.avatar || '',
-        to_number: number,
-        message: message || '',
-      },
-    });
-    if (!res.ok) {
+    const payload = {
+      from_instance: instanceId(),
+      from_addr: myAddresses()[0] || '',
+      from_addrs: myAddresses().slice(0, 4),
+      from_number: me.number,
+      from_nickname: me.nickname,
+      from_avatar: me.avatar || '',
+      to_number: number,
+      message: message || '',
+    };
+    let directError = '';
+    if (clean) {
+      const res = await callPeer(clean, '/api/federation/handshake', { method: 'POST', body: payload });
+      if (res.ok) {
+        return { ok: true, pending: true, friend: !!res.body?.friend, auto: !!res.body?.auto, via: 'direct', addr: clean };
+      }
       const map = {
         404: res.body?.error || '对方没有这个号码',
         409: res.body?.error || '这个号码在本实例已被占用',
         429: '对方实例太忙，稍后再试',
       };
-      return { code: res.status || 502, error: map[res.status] || '对方实例连不上' };
+      /* 404 / 409 是对方明确回绝（没这个号 / 号被占了），换中继也一样，直接报错 */
+      if (res.status === 404 || res.status === 409) return { code: res.status, error: map[res.status] };
+      directError = map[res.status] || res.error || '对方实例连不上';
     }
-    return { ok: true, pending: true, friend: !!res.body?.friend, auto: !!res.body?.auto };
+    if (knownInstance && relay?.enabled()) {
+      const out = await relay.send(knownInstance, 'handshake', payload);
+      if (out.ok) {
+        log?.info?.('[fed] 好友申请走中继排队 ' + me.number + ' → ' + number);
+        return { ok: true, pending: true, friend: false, auto: false, via: 'relay', queued: true, online: !!out.online };
+      }
+      return {
+        code: 502,
+        error: (directError ? '直连失败（' + directError + '），' : '') + '中继也没成功：' + out.error,
+      };
+    }
+    return { code: 502, error: directError || '对方实例连不上' };
   }
 
   /** 收到别人的好友申请（对方实例调过来） */
@@ -464,7 +509,6 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
       addrs: myAddresses().slice(0, 4),
     };
     const cands = candidatesFor(remoteAccount);
-    if (!cands.length) return { ok: false, error: '缺少对方实例地址' };
     const tried = [];
     for (const addr of cands) {
       const res = await callPeer(addr, '/api/federation/accept', { method: 'POST', body: payload, timeout: 5000 });
@@ -473,11 +517,30 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
         setPeerAddrs(remoteAccount.number, [addr, ...cands]);
         makeFriends(me.id, remoteAccount.id);
         log?.info?.('[fed] 好友建立成功 ' + me.number + ' ↔ ' + remoteAccount.number + ' @ ' + addr);
-        return { ok: true, addr };
+        return { ok: true, addr, via: 'direct' };
       }
       tried.push(addr + (res.status ? '(' + res.status + ')' : ''));
     }
+    /* 直连不上（最常见：对方在别的网络、家用宽带没有公网地址）：
+       把回执丢进中继排队，本地先建立好友关系，对方上线拉到这条回执后也会建立。
+       这样「点同意」不会再卡在「对方实例没连上」。 */
+    const targetInstance = String(remoteAccount.remote_instance || '');
+    if (targetInstance && relay?.enabled()) {
+      const out = await relay.send(targetInstance, 'accept', payload);
+      if (out.ok) {
+        db.prepare('UPDATE accounts SET remote_secret = ? WHERE id = ?').run(secret, remoteAccount.id);
+        makeFriends(me.id, remoteAccount.id);
+        log?.info?.('[fed] 好友回执走中继排队 ' + me.number + ' ↔ ' + remoteAccount.number);
+        return { ok: true, via: 'relay', queued: true };
+      }
+      log?.warn?.('[fed] 中继回执也失败 ' + remoteAccount.number + '：' + out.error);
+      return {
+        ok: false,
+        error: '对方实例连不上' + (cands.length ? '（试过 ' + cands.length + ' 个地址）' : '') + '，中继也没成功：' + out.error,
+      };
+    }
     log?.warn?.('[fed] 好友回执失败 ' + remoteAccount.number + ' 试过 ' + tried.join(', '));
+    if (!cands.length) return { ok: false, error: '缺少对方实例地址（对方没连中继，也没上报过地址）' };
     return { ok: false, error: '对方实例没连上（试过 ' + cands.length + ' 个地址：' + cands.join(' / ') + '）' };
   }
 
@@ -545,10 +608,31 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
     return { ok: true, id: Number(info2.lastInsertRowid), conversationId: convId };
   }
 
+  /** 中继拉回来的一件事：按类型交给对应处理器（握手 / 好友回执 / 消息投递） */
+  async function handleRelayEvent(kind, payload, fromInstance = '') {
+    if (kind === 'handshake') return handleHandshake(payload, '');
+    if (kind === 'accept') return handleAccept(payload, '');
+    if (kind === 'deliver') {
+      const headers = {
+        'x-fe-secret': String(payload?.secret || ''),
+        'x-fe-instance': String(payload?.instance || fromInstance || ''),
+      };
+      const body = payload?.body || {
+        from_number: payload?.from_number,
+        to_number: payload?.to_number,
+        message: payload?.message,
+      };
+      return handleDeliver(headers, body);
+    }
+    return { error: '不认识的中继事件类型 ' + kind };
+  }
+
   /** 本地发出一条消息后，把它塞进投递队列 */
   function enqueue(convId, me, peer, msg) {
     const addr = candidatesFor(peer)[0] || normalizeAddr(peer.remote_addr);
-    if (!addr || !peer.remote_secret) return { ok: false, error: '远端好友缺少地址或密钥' };
+    /* 没有可直连地址时，只要对方连了中继就还能投（走中继排队） */
+    const viaRelay = !addr && !!peer.remote_instance && !!relay?.enabled();
+    if ((!addr && !viaRelay) || !peer.remote_secret) return { ok: false, error: '远端好友缺少地址或密钥' };
     db.prepare(
       `INSERT INTO federation_outbox
          (conv_id, from_number, to_number, to_addr, to_secret, payload, attempts, next_at, created_at)
@@ -571,14 +655,34 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
       .prepare('SELECT * FROM federation_outbox WHERE next_at <= ? ORDER BY id LIMIT 20')
       .all(Date.now());
     for (const row of due) {
-      const res = await callPeer(row.to_addr, '/api/federation/deliver', {
-        method: 'POST',
-        headers: { 'x-fe-instance': instanceId(), 'x-fe-secret': row.to_secret },
-        body: { from_number: row.from_number, to_number: row.to_number, message: JSON.parse(row.payload) },
-      });
+      const body = { from_number: row.from_number, to_number: row.to_number, message: JSON.parse(row.payload) };
+      const res = row.to_addr
+        ? await callPeer(row.to_addr, '/api/federation/deliver', {
+            method: 'POST',
+            headers: { 'x-fe-instance': instanceId(), 'x-fe-secret': row.to_secret },
+            body,
+          })
+        : { ok: false, status: 0, error: '没有可直连的地址' };
       if (res.ok) {
         db.prepare('DELETE FROM federation_outbox WHERE id = ?').run(row.id);
         continue;
+      }
+      /* 直连不通：如果对方连了中继，就把这条消息排到中继队列里，对方上线自己拉 */
+      const peerAcc = remoteAccountByNumber(row.to_number);
+      const viaInstance = String(peerAcc?.remote_instance || '');
+      if (viaInstance && relay?.enabled()) {
+        const out = await relay.send(viaInstance, 'deliver', {
+          from_number: row.from_number,
+          to_number: row.to_number,
+          message: body.message,
+          secret: row.to_secret,
+          instance: instanceId(),
+        });
+        if (out.ok) {
+          db.prepare('DELETE FROM federation_outbox WHERE id = ?').run(row.id);
+          log?.info?.('[fed] 消息走中继排队 ' + row.from_number + ' → ' + row.to_number);
+          continue;
+        }
       }
       const attempts = row.attempts + 1;
       // 对方地址可能变了（换了 Wi-Fi / IPv6 临时地址过期）：换一个候选地址再投
@@ -708,6 +812,8 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
 
   return {
     instanceId,
+    setRelay,
+    handleRelayEvent,
     autoAccept,
     setAutoAccept,
     publicAddr,

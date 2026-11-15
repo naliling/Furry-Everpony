@@ -31,6 +31,8 @@ public final class Api {
   private final Map<String, long[]> typing = new LinkedHashMap<String, long[]>();
   /** 实例互联：邀请码、跨实例好友、消息投递。 */
   private Federation fed;
+  /** 跨网络中继：两端都不在同一网络、也没有公网地址时兜底转发。 */
+  private Relay relay;
 
   public Api(Store store, File dataDir, String version, int port) {
     this.store = store;
@@ -652,8 +654,11 @@ public final class Api {
   public void register(final Http http) {
     new Groups(this, store, dataDir).register(http);
     fed = new Federation(this, store, dataDir, port, version);
+    relay = new Relay(fed);
+    fed.setRelay(relay);
     fed.register(http);
     fed.start();
+    relay.start();
 
     http.route("GET", "/api/health", new Http.Handler() {
       public void handle(Http.Req req, Http.Res res) {
@@ -1867,6 +1872,54 @@ public final class Api {
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         out.put("count", items.size());
         out.put("items", items);
+        res.json(out);
+      }
+    });
+
+    http.route("GET", "/api/relay/status", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, Object> me = requireMe(req, res);
+        if (me == null) return;
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        out.put("ok", Boolean.TRUE);
+        if (relay == null) {
+          out.put("enabled", Boolean.FALSE);
+          out.put("url", "");
+          res.json(out);
+          return;
+        }
+        out.putAll(relay.status());
+        res.json(out);
+      }
+    });
+
+    http.route("PATCH", "/api/relay/settings", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, Object> me = requireMe(req, res);
+        if (me == null) return;
+        if (relay == null) {
+          res.error(500, "中继模块没起来，重开一次 App 试试");
+          return;
+        }
+        Map<String, Object> body = req.json();
+        String raw = str(body, "url").trim();
+        if (!raw.isEmpty() && Relay.normalizeUrl(raw).isEmpty()) {
+          res.error(400, "中继地址格式不对，示例：https://relay.example.com:7800");
+          return;
+        }
+        relay.setUrl(raw);
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        out.put("ok", Boolean.TRUE);
+        if (raw.isEmpty()) {
+          relay.stop();
+          out.putAll(relay.status());
+          res.json(out);
+          return;
+        }
+        relay.start();
+        Map<String, Object> reg = relay.register();
+        out.putAll(relay.status());
+        out.put("registerError", reg.get("error"));
         res.json(out);
       }
     });

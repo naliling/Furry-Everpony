@@ -116,7 +116,11 @@ export function AddFriendModal({ token, onClose, onChanged }) {
       setDone({
         name: person.nickname || person.number,
         number: person.number,
-        text: out.friend ? '已加为好友，现在就能聊天了' : '好友申请已发出，等对方同意',
+        text: out.friend
+          ? '已加为好友，现在就能聊天了'
+          : out.via === 'relay'
+            ? '直连不通，申请已排进中继队列，对方上线后会自动收到'
+            : '好友申请已发出，等对方同意',
       });
     } catch (e) {
       setErr(e.message);
@@ -155,6 +159,8 @@ export function AddFriendModal({ token, onClose, onChanged }) {
         onChanged?.();
         if (data.friend) {
           setDone({ name: acc.nickname || acc.number, number: acc.number, text: '已加为好友，现在就能聊天了' });
+        } else if (data.via === 'relay' || data.queued) {
+          setDone({ name: acc.nickname || acc.number, number: acc.number, text: '两边直连不通，申请已排进中继队列，对方上线后会自动收到' });
         } else if (data.requested) {
           setDone({ name: acc.nickname || acc.number, number: acc.number, text: '已向对方发出好友申请，同意后就能聊天' });
         } else {
@@ -170,9 +176,15 @@ export function AddFriendModal({ token, onClose, onChanged }) {
         setFound({ ...data, addr: target.addr });
         if (data.isFriend) { setDone({ name: acc.nickname || acc.number, number: acc.number, text: '你们已经是好友了' }); return; }
         if (data.hasPending) { setDone({ name: acc.nickname || acc.number, number: acc.number, text: '之前已经申请过了，等对方同意' }); return; }
-        await api('/api/federation/request', { method: 'POST', token, body: { addr: target.addr, number: target.number, message: message.trim() } });
+        const reqOut = await api('/api/federation/request', { method: 'POST', token, body: { addr: target.addr, number: target.number, message: message.trim() } });
         onChanged?.();
-        setDone({ name: acc.nickname || acc.number, number: acc.number, text: '已发出好友申请，对方在 ' + target.addr + ' 上' });
+        setDone({
+          name: acc.nickname || acc.number,
+          number: acc.number,
+          text: reqOut?.via === 'relay'
+            ? '直连不通，申请已排进中继队列，对方上线后会自动收到'
+            : '已发出好友申请，对方在 ' + target.addr + ' 上',
+        });
         return;
       }
 
@@ -237,6 +249,14 @@ export function AddFriendModal({ token, onClose, onChanged }) {
         <div className={'af-auto ' + (info?.autoAccept ? 'on' : '')}>
           <Icon name={info?.autoAccept ? 'check' : 'info'} size={14} />
           <span>{info?.autoAccept ? '已开启自动通过：拿我的邀请码/二维码加我的人直接成为好友，不用我点同意' : '自动通过已关闭：别人加我要我在「新朋友」里点同意'}</span>
+        </div>
+        <div className={'af-auto ' + (info?.relay?.enabled ? 'on' : '')}>
+          <Icon name={info?.relay?.enabled ? 'shield' : 'warning'} size={14} />
+          <span>
+            {info?.relay?.enabled
+              ? '跨网络兜底已就绪：直连不通的申请和消息会经中继排队，对方上线后自动收到'
+              : '没配中继：只能同一个 Wi-Fi 直连，或对方有公网地址；不同网络加不上就去「设置 → 实例互联」填一台中继'}
+          </span>
         </div>
       </div>
 

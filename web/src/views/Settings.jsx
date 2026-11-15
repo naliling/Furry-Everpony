@@ -650,6 +650,8 @@ function FederationCard({ token }) {
   const [info, setInfo] = useState(null);
   const [nearby, setNearby] = useState([]);
   const [addr, setAddr] = useState('');
+  const [relayUrl, setRelayUrl] = useState('');
+  const [relayBusy, setRelayBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -661,6 +663,8 @@ function FederationCard({ token }) {
       ]);
       setInfo(i);
       if (i?.publicAddr) setAddr(i.publicAddr);
+      /* 只在第一次填进来，别把用户正在输入的内容每 6 秒覆盖掉 */
+      setRelayUrl((old) => old || i?.relay?.url || '');
       setNearby((n.instances || []).filter((x) => x.instanceId !== i?.instanceId));
     } catch {
       /* 忽略 */
@@ -685,6 +689,22 @@ function FederationCard({ token }) {
       setErr(e.message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const saveRelay = async () => {
+    setRelayBusy(true);
+    setErr('');
+    try {
+      const out = await api('/api/relay/settings', { method: 'PATCH', token, body: { url: relayUrl.trim() } });
+      setInfo((old) => ({ ...(old || {}), relay: { ...(old?.relay || {}), enabled: out.enabled, url: out.url, registered: out.registered, lastError: out.lastError } }));
+      if (!out.enabled) toast('已关闭中继，只走直连', 'success');
+      else if (out.registered) toast('中继已连上：' + out.url, 'success');
+      else toast('中继地址已保存，但还没连上' + (out.registerError ? '：' + out.registerError : ''), 'error');
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setRelayBusy(false);
     }
   };
 
@@ -744,6 +764,30 @@ function FederationCard({ token }) {
             }
           }}
         />
+      </div>
+
+      <div className="settings-row">
+        <div className="settings-row-main">
+          <b><Icon name="shield" size={16} /> 中继服务器（跨网络兜底）</b>
+          <span>
+            {info?.relay?.enabled
+              ? info.relay.registered
+                ? '已连上 ' + info.relay.url + '：两边直连不通时，好友申请和消息会经中继排队，对方上线后自动收到'
+                : '地址已保存，但还没连上' + (info.relay.lastError ? '：' + info.relay.lastError : '')
+              : '没配：只能靠直连（同一个 Wi-Fi，或对方有公网地址）。配一台中继后，两边不同网络也能加好友、发消息'}
+          </span>
+        </div>
+      </div>
+
+      <div className="fed-row">
+        <label className="field">
+          <span className="field-label">中继地址（留空 = 只用直连）</span>
+          <div className="input-wrap">
+            <Icon name="shield" size={15} className="input-lead" />
+            <input className="input" placeholder="例如 relay.example.com:7800" value={relayUrl} onChange={(e) => setRelayUrl(e.target.value.trim())} />
+          </div>
+        </label>
+        <button type="button" className="btn btn-primary btn-sm" disabled={relayBusy} onClick={saveRelay}>{relayBusy ? <Spinner size={14} /> : null} 保存</button>
       </div>
 
       <div className="fed-row">

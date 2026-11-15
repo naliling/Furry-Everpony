@@ -62,6 +62,8 @@ public final class Federation {
   private Thread udpThread;
   private DatagramSocket udpSocket;
   private volatile DeliveredHook deliveredHook;
+  /** 跨网络兜底的中继客户端（没配地址时为 null 或 enabled()=false，功能照常走直连）。 */
+  private volatile Relay relay;
 
   public Federation(Api api, Store store, File dataDir, int port, String version) {
     this.api = api;
@@ -69,6 +71,18 @@ public final class Federation {
     this.dataDir = dataDir;
     this.port = port;
     this.version = version;
+  }
+
+  public void setRelay(Relay client) {
+    this.relay = client;
+  }
+
+  public Relay relayClient() {
+    return relay;
+  }
+
+  public String version() {
+    return version;
   }
 
   public void setDeliveredHook(DeliveredHook hook) {
@@ -268,12 +282,12 @@ public final class Federation {
     return id;
   }
 
-  private String metaGet(String key) {
+  String metaGet(String key) {
     Map<String, Object> row = api.findOne("instance_meta", "key", key);
     return row == null ? "" : api.strOf(row, "value");
   }
 
-  private void metaSet(String key, String value) {
+  void metaSet(String key, String value) {
     Map<String, Object> row = api.findOne("instance_meta", "key", key);
     if (row == null) {
       row = out();
@@ -312,6 +326,7 @@ public final class Federation {
     m.put("myAddresses", new ArrayList<Object>(myAddresses()));
     m.put("autoAccept", Boolean.valueOf(autoAccept()));
     m.put("local", Boolean.TRUE);
+    if (relay != null) m.put("relay", relay.status());
     return m;
   }
 
@@ -326,18 +341,23 @@ public final class Federation {
       String clean = normalizeAddr(a);
       if (!clean.isEmpty() && !list.contains(clean)) list.add(clean);
     }
-    if (list.isEmpty()) return null;
+    String relayUrl = relay != null && relay.enabled() ? relay.url() : "";
+    if (list.isEmpty() && relayUrl.isEmpty()) return null;
     Map<String, Object> payload = out();
     payload.put("v", Integer.valueOf(1));
     payload.put("a", list);
     payload.put("n", api.strOf(me, "number"));
     payload.put("k", api.strOf(me, "nickname"));
     payload.put("e", Long.valueOf(System.currentTimeMillis() + INVITE_TTL));
+    payload.put("i", instanceId());
+    if (!relayUrl.isEmpty()) payload.put("r", relayUrl);
     String json = Json.write(payload);
     Map<String, Object> res = out();
     res.put("code", INVITE_PREFIX + b64url(json.getBytes(StandardCharsets.UTF_8)));
     res.put("expiresAt", payload.get("e"));
     res.put("addrs", list);
+    res.put("instanceId", instanceId());
+    res.put("relay", relayUrl);
     return res;
   }
 
@@ -369,12 +389,18 @@ public final class Federation {
       String clean = normalizeAddr(str(o));
       if (!clean.isEmpty() && !addrs.contains(clean)) addrs.add(clean);
     }
-    if (addrs.isEmpty()) return err(400, "邀请码里没有可用的地址");
+    String instanceId = jsonStr(obj, "i").trim();
+    String relayUrl = Relay.normalizeUrl(jsonStr(obj, "r"));
+    if (addrs.isEmpty() && (instanceId.isEmpty() || relayUrl.isEmpty())) {
+      return err(400, "邀请码里没有可用的地址");
+    }
     Map<String, Object> res = out();
     res.put("number", number);
     res.put("nickname", jsonStr(obj, "k"));
     res.put("addrs", addrs);
     res.put("expiresAt", Long.valueOf(expiresAt));
+    res.put("instanceId", instanceId);
+    res.put("relay", relayUrl);
     return res;
   }
 
@@ -558,36 +584,72 @@ public final class Federation {
   }
 
   public Map<String, Object> sendRequest(Map<String, Object> me, String addr, String number, String message) {
+    return sendRequest(me, addr, number, message, "");
+  }
+
+  /**
+   * 发好友申请：先直连；直连不通但知道对方实例 ID 且配了中继时，交给中继排队，
+   * 对方上线后自己来拉（发送方不用一直在线，对方也不用有公网地址）。
+   */
+  public Map<String, Object> sendRequest(Map<String, Object> me, String addr, String number, String message,
+      String knownInstance) {
     String clean = normalizeAddr(addr);
-    if (clean.isEmpty()) return err(400, "实例地址格式不对");
+    String known = knownInstance == null ? "" : knownInstance.trim();
+    if (known.isEmpty()) {
+      Map<String, Object> mirror = remoteByNumber(number);
+      if (mirror != null) known = api.strOf(mirror, "remote_instance");
+    }
+    boolean relayReady = relay != null && relay.enabled() && !known.isEmpty();
+    if (clean.isEmpty() && !relayReady) return err(400, "实例地址格式不对");
     if (api.strOf(me, "number").equals(number)) return err(400, "不能加自己");
     List<String> mine = myAddresses();
     Map<String, Object> body = out();
     body.put("from_instance", instanceId());
     body.put("from_addr", mine.isEmpty() ? "" : mine.get(0));
+    body.put("from_addrs", new ArrayList<Object>(mine));
     body.put("from_number", api.strOf(me, "number"));
     body.put("from_nickname", api.strOf(me, "nickname"));
     body.put("from_avatar", api.strOf(me, "avatar"));
     body.put("to_number", number);
     body.put("message", message == null ? "" : message);
-    PeerResult r = callPeer(clean, "/api/federation/handshake", "POST", body, null, 8000);
-    if (r.ok) {
-      Map<String, Object> res = out();
-      res.put("ok", Boolean.TRUE);
-      res.put("pending", Boolean.TRUE);
-      if (Boolean.TRUE.equals(r.body.get("already"))) {
-        res.put("already", Boolean.TRUE);
+    PeerResult r = null;
+    if (!clean.isEmpty()) {
+      r = callPeer(clean, "/api/federation/handshake", "POST", body, null, 8000);
+      if (r.ok) {
+        Map<String, Object> res = out();
+        res.put("ok", Boolean.TRUE);
+        res.put("pending", Boolean.TRUE);
+        if (Boolean.TRUE.equals(r.body.get("already"))) {
+          res.put("already", Boolean.TRUE);
+        }
+        if (Boolean.TRUE.equals(r.body.get("friend"))) {
+          res.put("friend", Boolean.TRUE);
+        }
+        return res;
       }
-      if (Boolean.TRUE.equals(r.body.get("friend"))) {
-        res.put("friend", Boolean.TRUE);
-      }
-      return res;
+      String msg = jsonStr(r.body, "error");
+      if (r.status == 404) return err(404, msg.isEmpty() ? "对方没有这个号码" : msg);
+      if (r.status == 409) return err(409, msg.isEmpty() ? "这个号码在本实例已被占用" : msg);
+      if (r.status == 429) return err(429, "对方实例太忙，稍后再试");
     }
-    String msg = jsonStr(r.body, "error");
-    if (r.status == 404) return err(404, msg.isEmpty() ? "对方没有这个号码" : msg);
-    if (r.status == 409) return err(409, msg.isEmpty() ? "这个号码在本实例已被占用" : msg);
-    if (r.status == 429) return err(429, "对方实例太忙，稍后再试");
-    if (r.status == 0) return err(502, "对方实例连不上（" + (r.error.isEmpty() ? "网络不通" : r.error) + "）");
+    if (relayReady) {
+      Map<String, Object> sent = relay.send(known, "handshake", body);
+      if (Boolean.TRUE.equals(sent.get("ok"))) {
+        Map<String, Object> res = out();
+        res.put("ok", Boolean.TRUE);
+        res.put("pending", Boolean.TRUE);
+        res.put("via", "relay");
+        res.put("queued", Boolean.TRUE);
+        res.put("online", sent.get("online"));
+        return res;
+      }
+      return err(502, "直连和中继都没发出去（" + str(sent.get("error")) + "）");
+    }
+    String msg = r == null ? "" : jsonStr(r.body, "error");
+    if (r != null && r.status == 0) {
+      return err(502, "对方实例连不上（" + (r.error.isEmpty() ? "网络不通" : r.error) + "）");
+    }
+    if (r == null) return err(502, "对方实例连不上");
     return err(r.status, msg.isEmpty() ? "对方实例拒绝了这次申请" : msg);
   }
 
@@ -652,7 +714,9 @@ public final class Federation {
   /** 我同意了对方的好友申请：先让对方那边也建立好友，再落本地，避免单边好友。 */
   public Map<String, Object> notifyAccepted(Map<String, Object> mirror, Map<String, Object> me) {
     String addr = normalizeAddr(api.strOf(mirror, "remote_addr"));
-    if (addr.isEmpty()) {
+    String known = api.strOf(mirror, "remote_instance");
+    boolean relayReady = relay != null && relay.enabled() && !known.isEmpty();
+    if (addr.isEmpty() && !relayReady) {
       Map<String, Object> m = out();
       m.put("ok", Boolean.FALSE);
       m.put("error", "缺少对方实例地址");
@@ -668,12 +732,26 @@ public final class Federation {
     body.put("nickname", api.strOf(me, "nickname"));
     body.put("avatar", api.strOf(me, "avatar"));
     body.put("addr", mine.isEmpty() ? "" : mine.get(0));
-    PeerResult r = callPeer(addr, "/api/federation/accept", "POST", body, null, 8000);
-    if (!r.ok) {
+    PeerResult r = addr.isEmpty() ? null : callPeer(addr, "/api/federation/accept", "POST", body, null, 8000);
+    if (r == null || !r.ok) {
+      if (relayReady) {
+        Map<String, Object> sent = relay.send(known, "accept", body);
+        if (Boolean.TRUE.equals(sent.get("ok"))) {
+          mirror.put("remote_secret", secret);
+          api.saveAll();
+          api.makeFriendsOf(api.numOf(me, "id"), api.idOf(mirror));
+          Map<String, Object> m = out();
+          m.put("ok", Boolean.TRUE);
+          m.put("via", "relay");
+          m.put("queued", Boolean.TRUE);
+          return m;
+        }
+      }
       Map<String, Object> m = out();
       m.put("ok", Boolean.FALSE);
-      String msg = jsonStr(r.body, "error");
-      m.put("error", msg.isEmpty() ? "对方实例没连上，好友还没建立成功" : msg);
+      String msg = r == null ? "" : jsonStr(r.body, "error");
+      if (msg.isEmpty()) msg = "对方实例没连上，好友还没建立成功";
+      m.put("error", msg);
       return m;
     }
     mirror.put("remote_secret", secret);
@@ -780,7 +858,10 @@ public final class Federation {
   public boolean enqueue(long convId, Map<String, Object> me, Map<String, Object> peer, Map<String, Object> msg) {
     String addr = normalizeAddr(api.strOf(peer, "remote_addr"));
     String secret = api.strOf(peer, "remote_secret");
-    if (addr.isEmpty() || secret.isEmpty()) return false;
+    String known = api.strOf(peer, "remote_instance");
+    boolean relayReady = relay != null && relay.enabled() && !known.isEmpty();
+    if (secret.isEmpty()) return false;
+    if (addr.isEmpty() && !relayReady) return false;
     Map<String, Object> payload = out();
     payload.put("kind", str(msg.get("kind")));
     payload.put("body", str(msg.get("body")));
@@ -826,11 +907,30 @@ public final class Federation {
       Map<String, String> headers = new LinkedHashMap<String, String>();
       headers.put("x-fe-instance", instanceId());
       headers.put("x-fe-secret", api.strOf(row, "to_secret"));
-      PeerResult r = callPeer(api.strOf(row, "to_addr"), "/api/federation/deliver", "POST", body, headers, 8000);
-      if (r.ok) {
+      String toAddr = api.strOf(row, "to_addr");
+      PeerResult r = toAddr.isEmpty() ? null
+          : callPeer(toAddr, "/api/federation/deliver", "POST", body, headers, 8000);
+      if (r != null && r.ok) {
         api.deleteRow("federation_outbox", row);
         sent++;
         continue;
+      }
+      /* 直连不通：知道对方实例 ID 且有中继就交给中继排队 */
+      Map<String, Object> peerMirror = remoteByNumber(api.strOf(row, "to_number"));
+      String viaInstance = peerMirror == null ? "" : api.strOf(peerMirror, "remote_instance");
+      if (relay != null && relay.enabled() && !viaInstance.isEmpty()) {
+        Map<String, Object> relayPayload = out();
+        relayPayload.put("from_number", api.strOf(row, "from_number"));
+        relayPayload.put("to_number", api.strOf(row, "to_number"));
+        relayPayload.put("message", payload);
+        relayPayload.put("secret", api.strOf(row, "to_secret"));
+        relayPayload.put("instance", instanceId());
+        Map<String, Object> relayOut = relay.send(viaInstance, "deliver", relayPayload);
+        if (Boolean.TRUE.equals(relayOut.get("ok"))) {
+          api.deleteRow("federation_outbox", row);
+          sent++;
+          continue;
+        }
       }
       long attempts = lng(row.get("attempts")) + 1;
       if (attempts >= MAX_ATTEMPTS) {
@@ -841,13 +941,30 @@ public final class Federation {
       if (delay > 300000L) delay = 300000L;
       row.put("attempts", Long.valueOf(attempts));
       row.put("next_at", Long.valueOf(System.currentTimeMillis() + delay));
-      String msg = jsonStr(r.body, "error");
-      if (msg.isEmpty()) msg = r.error.isEmpty() ? ("HTTP " + r.status) : r.error;
+      String msg = r == null ? "" : jsonStr(r.body, "error");
+      if (msg.isEmpty()) msg = r == null || r.error.isEmpty() ? "直连不通" : r.error;
       if (msg.length() > 200) msg = msg.substring(0, 200);
       row.put("last_error", msg);
     }
     if (!due.isEmpty()) api.saveAll();
     return sent;
+  }
+
+  /* ================= 中继进来的事件 ================= */
+
+  /** 中继拉下来的事件按类型分派：握手申请、同意回执、消息投递。 */
+  public Map<String, Object> handleRelayEvent(String kind, Map<String, Object> payload, String fromInstance) {
+    Map<String, Object> body = payload == null ? out() : payload;
+    if ("handshake".equals(kind)) return handleHandshake(body);
+    if ("accept".equals(kind)) return handleAccept(body);
+    if ("deliver".equals(kind)) {
+      Map<String, String> headers = new LinkedHashMap<String, String>();
+      headers.put("x-fe-secret", jsonStr(body, "secret"));
+      String inst = jsonStr(body, "instance");
+      headers.put("x-fe-instance", inst.isEmpty() ? (fromInstance == null ? "" : fromInstance) : inst);
+      return handleDeliver(headers, body);
+    }
+    return err(400, "不认识的中继事件：" + kind);
   }
 
   /* ================= 局域网发现 ================= */
@@ -1212,6 +1329,7 @@ public final class Federation {
           res.error(400, "这是你自己的邀请码");
           return;
         }
+        String peerInstance = jsonStr(parsed, "instanceId");
         Map<String, Object> last = null;
         int tried = 0;
         for (Object o : Json.arr(parsed.get("addrs"))) {
@@ -1225,21 +1343,41 @@ public final class Federation {
             out.put("tried", Integer.valueOf(tried));
             out.put("nickname", jsonStr(parsed, "nickname"));
             // 自动发申请：用户不用再点一次
-            Map<String, Object> reqOut = sendRequest(me, addr, number, "通过邀请码添加");
+            Map<String, Object> reqOut = sendRequest(me, addr, number, "通过邀请码添加", peerInstance);
             if (reqOut.containsKey("error")) {
               out.put("requested", Boolean.FALSE);
               out.put("requestError", jsonStr(reqOut, "error"));
             } else {
               out.put("requested", Boolean.TRUE);
               if (Boolean.TRUE.equals(reqOut.get("friend"))) out.put("friend", Boolean.TRUE);
+              if (reqOut.get("via") != null) {
+                out.put("via", reqOut.get("via"));
+                out.put("queued", Boolean.TRUE);
+              }
             }
             res.json(out);
             return;
           }
           last = found;
         }
+        /* 一个地址都不通：有中继就直接排进中继队列，对方上线自动收到 */
+        if (relay != null && relay.enabled() && !peerInstance.isEmpty()) {
+          Map<String, Object> reqOut = sendRequest(me, "", number, "通过邀请码添加", peerInstance);
+          if (!reqOut.containsKey("error")) {
+            Map<String, Object> out = out();
+            out.put("ok", Boolean.TRUE);
+            out.put("requested", Boolean.TRUE);
+            out.put("via", "relay");
+            out.put("queued", Boolean.TRUE);
+            out.put("tried", Integer.valueOf(tried));
+            out.put("nickname", jsonStr(parsed, "nickname"));
+            out.put("number", number);
+            res.json(out);
+            return;
+          }
+        }
         String msg = last == null ? "连不上对方的实例" : jsonStr(last, "error");
-        res.error(404, msg + "（试了 " + tried + " 个地址都不通：对方可能没有公网 IPv6，或者光猫/路由器把入站拦了）");
+        res.error(404, msg + "（试了 " + tried + " 个地址都不通：对方可能没有公网 IPv6，或者光猫/路由器把入站拦了；想让对方不在同一网络也能加，就在设置里配一台中继）");
       }
     });
 
@@ -1302,7 +1440,8 @@ public final class Federation {
         Map<String, Object> body = req.json();
         String addr = str(body.get("addr")).trim();
         String number = str(body.get("number")).trim();
-        if (addr.isEmpty()) {
+        String instanceId = str(body.get("instanceId")).trim();
+        if (addr.isEmpty() && instanceId.isEmpty()) {
           res.error(400, "跨实例加好友要填对方的实例地址");
           return;
         }
@@ -1310,7 +1449,7 @@ public final class Federation {
           res.error(400, "号码格式不对");
           return;
         }
-        Map<String, Object> out = sendRequest(me, addr, number, str(body.get("message")));
+        Map<String, Object> out = sendRequest(me, addr, number, str(body.get("message")), instanceId);
         if (out.containsKey("error")) {
           int code = (int) lng(out.get("code"));
           res.error(code == 0 ? 400 : code, jsonStr(out, "error"));

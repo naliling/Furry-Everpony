@@ -17,9 +17,9 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyDescription("Furry Everpony 启动器（自解压）")]
 [assembly: System.Reflection.AssemblyCompany("Furry Everpony")]
 [assembly: System.Reflection.AssemblyCopyright("Furry Everpony")]
-[assembly: System.Reflection.AssemblyVersion("2026.11.15.0")]
-[assembly: System.Reflection.AssemblyFileVersion("2026.11.15.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("2026.11.15.0.10.12")]
+[assembly: System.Reflection.AssemblyVersion("2026.11.16.0")]
+[assembly: System.Reflection.AssemblyFileVersion("2026.11.16.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("2026.11.16.0.10.16")]
 
 namespace FeSfx {
   // 把整包里的某一段当成独立流来读
@@ -199,7 +199,7 @@ namespace FeSfx {
       try { File.AppendAllText(Path.Combine(Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName), "fe-sfx.log"), line, Encoding.UTF8); } catch { }
     }
     const string Magic = "FESFX001";
-    const string Version = "2026.11.15.0.10.12";
+    const string Version = "2026.11.16.0.10.16";
     const string AppExe = "Furry Everpony.exe";
 
     [STAThread]

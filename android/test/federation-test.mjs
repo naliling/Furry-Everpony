@@ -114,6 +114,11 @@ try {
   check('federation/bots 200', fedBots.status === 200, fedBots.data);
   check('federation/bots 结构完整', Array.isArray(fedBots.data.bots) && !!fedBots.data.instanceId, fedBots.data);
 
+  // 先关掉 A 的自动通过：本节测的是「人工同意」链路，自动通过在 relay-test.mjs 里单独测
+  const offA = await apiA('PATCH', '/api/federation/settings', { token: tokA, json: { autoAccept: false } });
+  check('关闭自动通过 200', offA.status === 200, offA.data);
+  check('自动通过已关闭', offA.data && offA.data.autoAccept === false, offA.data);
+
   // ---- 邀请码：A 生成，B 一键接受（应自动发好友申请） ----
   const inv = await apiA('GET', '/api/federation/invite', { token: tokA });
   check('生成邀请码 200', inv.status === 200, inv.data);

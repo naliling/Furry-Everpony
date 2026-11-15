@@ -10,6 +10,7 @@ import { createOneBot } from './onebot.js';
 import { createLogger } from './log.js';
 import { createAi } from './ai.js';
 import { createFederation, normalizeAddr, parseInvite } from './federation.js';
+import { createRelayClient, normalizeRelayUrl } from './relay-client.js';
 import { collectAccount, openPackage, restoreAccount, sealPackage } from './backup.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -59,7 +60,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.15.0.10.15';
+const VERSION = '2026.11.16.0.10.16';
 
 const NUMBER_RE = /^[1-9]\d{4,11}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 5–12 位数字，且不能以 0 开头');
@@ -126,6 +127,11 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
       log.warn('[fed] 启动失败', (e && e.message) || e);
     }
     try {
+      relay.start();
+    } catch (e) {
+      log.warn('[relay] 启动失败', (e && e.message) || e);
+    }
+    try {
       onebot.startOutLinks();
     } catch (e) {
       log.warn('[onebot] 启动后恢复反向连接失败', (e && e.message) || e);
@@ -180,7 +186,18 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
   });
   app.decorate('federation', fed);
 
+  /* 中继：只用来「兜底跨网络」。两边能直连时走直连，直连不上才排队到中继，
+     对方上线后自己拉。不配中继地址就完全空转，行为和以前一样。 */
+  const relay = createRelayClient({ db, log, fed, version: VERSION });
+  fed.setRelay(relay);
+  app.decorate('relay', relay);
+
   app.addHook('onClose', async () => {
+    try {
+      relay.stop();
+    } catch {
+      /* 已经停了 */
+    }
     try {
       fed.stop();
     } catch {
@@ -2888,7 +2905,11 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const me = requireAuth(req, reply);
     if (!me) return;
     const info = fed.info(HOST === '0.0.0.0' || HOST === '::');
-    return { ...info, publicV6Urls: publicV6Candidates().map((item) => 'http://[' + item.address + ']:' + PORT) };
+    return {
+      ...info,
+      relay: relay.status(),
+      publicV6Urls: publicV6Candidates().map((item) => 'http://[' + item.address + ']:' + PORT),
+    };
   });
 
   /** 生成邀请码：一段可以直接发微信/短信给朋友的文本，对方粘进「加好友 → 不同网络」就能连上 */
@@ -2913,12 +2934,13 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const invite = parseInvite(parsed.data.code);
     if (invite.error) return reply.code(400).send({ error: invite.error });
     if (invite.number === me.number) return reply.code(400).send({ error: '这是你自己的邀请码' });
+    const opts = { instanceId: invite.instanceId || '' };
     let last = null;
     for (const addr of invite.addrs) {
       const out = await fed.lookup(me, addr, invite.number);
       if (out.account) {
         // 一步到位：解析出账号就顺手把好友申请发过去，用户不用再点第二次
-        const reqOut = await fed.sendRequest(me, addr, invite.number, '通过邀请码添加');
+        const reqOut = await fed.sendRequest(me, addr, invite.number, '通过邀请码添加', opts);
         return {
           ...out,
           addr,
@@ -2926,9 +2948,29 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
           requested: !reqOut.error,
           requestError: reqOut.error || '',
           friend: !!reqOut.friend,
+          via: reqOut.via || 'direct',
+          queued: !!reqOut.queued,
         };
       }
       last = out;
+    }
+    /* 一个地址都连不上（或者邀请码里压根没有地址，只有中继）：
+       只要邀请码里带了实例 ID 并且我们配了中继，就把申请排进中继队列。 */
+    if (invite.instanceId && relay.enabled()) {
+      const reqOut = await fed.sendRequest(me, '', invite.number, '通过邀请码添加', opts);
+      if (!reqOut.error) {
+        return {
+          account: null,
+          addr: '',
+          tried: invite.addrs.length,
+          requested: true,
+          requestError: '',
+          friend: !!reqOut.friend,
+          via: 'relay',
+          queued: true,
+        };
+      }
+      return reply.code(reqOut.code || 502).send({ error: reqOut.error });
     }
     return reply.code(last?.code || 404).send({
       error:
@@ -2973,15 +3015,49 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const me = requireAuth(req, reply);
     if (!me) return;
     const parsed = z
-      .object({ addr: z.string().max(200).optional(), number: numberSchema, message: z.string().max(120).optional() })
+      .object({
+        addr: z.string().max(200).optional(),
+        instanceId: z.string().max(64).optional(),
+        number: numberSchema,
+        message: z.string().max(120).optional(),
+      })
       .safeParse(req.body || {});
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
-    if (!String(parsed.data.addr || '').trim()) {
+    const addr = String(parsed.data.addr || '').trim();
+    const instanceId = String(parsed.data.instanceId || '').trim();
+    if (!addr && !instanceId) {
       return reply.code(400).send({ error: '跨实例加好友要填对方的实例地址' });
     }
-    const out = await fed.sendRequest(me, parsed.data.addr, parsed.data.number, parsed.data.message);
+    const out = await fed.sendRequest(me, addr, parsed.data.number, parsed.data.message, { instanceId });
     if (out.error) return reply.code(out.code || 400).send({ error: out.error });
     return out;
+  });
+
+  /** 中继状态：设置页要看「连没连上中继、积压多少条」 */
+  app.get('/api/relay/status', async (req, reply) => {
+    const me = requireAuth(req, reply);
+    if (!me) return;
+    return { ok: true, ...relay.status() };
+  });
+
+  /** 设置中继地址：传空字符串就是关掉中继（回到纯直连） */
+  app.patch('/api/relay/settings', async (req, reply) => {
+    const me = requireAuth(req, reply);
+    if (!me) return;
+    const parsed = z.object({ url: z.string().max(300).optional() }).safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
+    const raw = String(parsed.data.url ?? '').trim();
+    if (raw && !normalizeRelayUrl(raw)) {
+      return reply.code(400).send({ error: '中继地址格式不对，示例：https://relay.example.com:7800' });
+    }
+    const next = relay.setUrl(raw);
+    if (!next) {
+      relay.stop();
+      return { ok: true, ...relay.status(), registerError: '' };
+    }
+    relay.start();
+    const reg = await relay.register();
+    return { ok: true, ...relay.status(), registerError: reg.ok ? '' : reg.error || '' };
   });
 
   /* ----- 下面几个是「别的实例调过来」的接口 ----- */
