@@ -3156,3 +3156,48 @@ body,
   .qr-scan { position: fixed; inset: 0; border-radius: 0; }
   .qr-scan-frame { width: min(74%, 260px); }
 }
+
+/* 本机中转站：地址 + 二维码，手机扫一下就配好 */
+.fed-host {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  margin: 2px 0 12px;
+  border-radius: 14px;
+  background: rgba(34, 211, 238, 0.07);
+  border: 1px solid rgba(34, 211, 238, 0.24);
+}
+.fed-host-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fed-host-main b {
+  font-size: 0.9rem;
+  color: var(--text, #e8ecf6);
+}
+.fed-host-main span {
+  font-size: 0.78rem;
+  color: var(--muted, #8b93a7);
+  line-height: 1.5;
+  word-break: break-all;
+}
+.fed-host .qr-box {
+  flex: 0 0 auto;
+  background: #fff;
+  padding: 6px;
+  border-radius: 10px;
+  line-height: 0;
+}
+@media (max-width: 560px) {
+  .fed-host {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .fed-host .qr-box {
+    margin: 0 auto;
+  }
+}

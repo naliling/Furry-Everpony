@@ -1924,6 +1924,222 @@ public final class Api {
       }
     });
 
+    /* ================= 跨实例（联邦）：手机也能被加、也能生成邀请码 =================
+       以前安卓端一个联邦接口都没有，所以手机只能「去加别人」，别人永远加不到手机。
+       这里把电脑端那套接口补齐，路径与参数完全一致，前端不用区分平台。 */
+
+    http.route("GET", "/api/federation/info", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, Object> me = requireMe(req, res);
+        if (me == null) return;
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        out.putAll(fed.info());
+        out.put("autoAccept", Boolean.valueOf(fed.autoAccept()));
+        res.json(out);
+      }
+    });
+
+    http.route("GET", "/api/federation/invite", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, Object> me = requireMe(req, res);
+        if (me == null) return;
+        Map<String, Object> invite = fed.makeInvite(me);
+        if (invite == null) {
+          res.error(400, "现在没有可用的地址，也没有配中继：先在设置里填一个中继服务器地址");
+          return;
+        }
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        out.put("ok", Boolean.TRUE);
+        out.putAll(invite);
+        out.put("publicV6", fed.v6Addresses());
+        out.put("boundToLan", Boolean.TRUE);
+        res.json(out);
+      }
+    });
+
+    http.route("POST", "/api/federation/invite/accept", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, Object> me = requireMe(req, res);
+        if (me == null) return;
+        Map<String, Object> body = req.json();
+        String code = str(body, "code").trim();
+        if (code.isEmpty()) {
+          res.error(400, "邀请码不能为空");
+          return;
+        }
+        Map<String, Object> invite = fed.parseInvite(code);
+        if (invite.containsKey("error")) {
+          long c = num(invite, "code");
+          res.error(c == 0 ? 400 : (int) c, str(invite, "error"));
+          return;
+        }
+        String myNumber = str(me, "number");
+        if (myNumber.equals(str(invite, "number"))) {
+          res.error(400, "这是你自己的邀请码");
+          return;
+        }
+        /* 邀请码里带了中继地址：先把自己挂到中继上再发握手。
+           手机在内网/移动网络下基本不可能被回连（NAT、防火墙），
+           先连上中继，对方连不上我时能把回执丢进中继，我拉一下就到了。 */
+        String inviteRelay = str(invite, "relay");
+        String inviteInstance = str(invite, "instanceId");
+        boolean relayAuto = false;
+        if (!inviteRelay.isEmpty() && !inviteInstance.isEmpty() && relay != null && !relay.enabled()) {
+          relay.setUrl(inviteRelay);
+          relay.start();
+          Map<String, Object> reg = relay.register();
+          relayAuto = Boolean.TRUE.equals(reg.get("ok"));
+        }
+        List<Object> addrs = new ArrayList<Object>();
+        Object rawAddrs = invite.get("addrs");
+        if (rawAddrs instanceof List) {
+          for (Object o : (List<?>) rawAddrs) {
+            String clean = Federation.normalizeAddr(o == null ? "" : String.valueOf(o));
+            if (!clean.isEmpty() && !addrs.contains(clean)) addrs.add(clean);
+          }
+        }
+        String number = str(invite, "number");
+        Map<String, Object> last = null;
+        for (Object a : addrs) {
+          String addr = a == null ? "" : String.valueOf(a);
+          Map<String, Object> look = fed.lookup(me, addr, number);
+          if (look.containsKey("error") || look.get("account") == null) {
+            last = look;
+            continue;
+          }
+          Map<String, Object> reqOut = fed.sendRequest(me, addr, number, "通过邀请码添加", inviteInstance);
+          Map<String, Object> out = new LinkedHashMap<String, Object>();
+          out.putAll(look);
+          out.put("addr", addr);
+          out.put("tried", Integer.valueOf(addrs.size()));
+          out.put("requested", Boolean.valueOf(!reqOut.containsKey("error")));
+          out.put("requestError", reqOut.containsKey("error") ? str(reqOut, "error") : "");
+          out.put("friend", Boolean.valueOf(Boolean.TRUE.equals(reqOut.get("friend"))));
+          out.put("via", reqOut.get("via") == null ? "direct" : reqOut.get("via"));
+          out.put("queued", Boolean.valueOf(Boolean.TRUE.equals(reqOut.get("queued"))));
+          out.put("relayAuto", Boolean.valueOf(relayAuto));
+          res.json(out);
+          return;
+        }
+        /* 一个地址都连不上：有中继就排队 */
+        if (!inviteInstance.isEmpty() && relay != null && relay.enabled()) {
+          Map<String, Object> reqOut = fed.sendRequest(me, "", number, "通过邀请码添加", inviteInstance);
+          if (!reqOut.containsKey("error")) {
+            Map<String, Object> out = new LinkedHashMap<String, Object>();
+            out.put("account", null);
+            out.put("addr", "");
+            out.put("tried", Integer.valueOf(addrs.size()));
+            out.put("requested", Boolean.TRUE);
+            out.put("requestError", "");
+            out.put("friend", Boolean.valueOf(Boolean.TRUE.equals(reqOut.get("friend"))));
+            out.put("via", "relay");
+            out.put("queued", Boolean.TRUE);
+            out.put("relayAuto", Boolean.valueOf(relayAuto));
+            res.json(out);
+            return;
+          }
+          long c = num(reqOut, "code");
+          res.error(c == 0 ? 502 : (int) c, str(reqOut, "error"));
+          return;
+        }
+        String msg = last == null ? "连不上对方的实例" : str(last, "error");
+        res.error(404, msg + "（试了 " + addrs.size() + " 个地址都不通：对方可能没有公网地址，或者被防火墙拦了）");
+      }
+    });
+
+    http.route("POST", "/api/federation/request", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, Object> me = requireMe(req, res);
+        if (me == null) return;
+        Map<String, Object> b = req.json();
+        String number = str(b, "number").trim();
+        if (number.isEmpty()) {
+          res.error(400, "号码不能为空");
+          return;
+        }
+        String addr = str(b, "addr").trim();
+        String instanceId = str(b, "instanceId").trim();
+        String message = str(b, "message");
+        Map<String, Object> out = fed.sendRequest(me, addr, number, message, instanceId);
+        if (out.containsKey("error")) {
+          long c = num(out, "code");
+          res.error(c == 0 ? 502 : (int) c, str(out, "error"));
+          return;
+        }
+        res.json(out);
+      }
+    });
+
+    http.route("GET", "/api/federation/nearby", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, Object> me = requireMe(req, res);
+        if (me == null) return;
+        res.json(fed.nearby());
+      }
+    });
+
+    http.route("PATCH", "/api/federation/settings", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, Object> me = requireMe(req, res);
+        if (me == null) return;
+        Map<String, Object> b = req.json();
+        if (b.containsKey("autoAccept")) fed.setAutoAccept(Boolean.TRUE.equals(b.get("autoAccept")) || "true".equals(str(b, "autoAccept")));
+        if (b.containsKey("publicAddr")) {
+          String raw = str(b, "publicAddr").trim();
+          if (!raw.isEmpty() && Federation.normalizeAddr(raw).isEmpty()) {
+            res.error(400, "地址格式不对，示例：1.2.3.4:7788");
+            return;
+          }
+          fed.setPublicAddr(raw);
+        }
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        out.put("ok", Boolean.TRUE);
+        out.put("publicAddr", fed.publicAddr());
+        out.put("autoAccept", Boolean.valueOf(fed.autoAccept()));
+        res.json(out);
+      }
+    });
+
+    /* 以下三个是「别人来找我」的入口，不能要求登录（对方实例没有我的 token） */
+    http.route("POST", "/api/federation/handshake", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, Object> out = fed.handleHandshake(req.json());
+        if (out.containsKey("error")) {
+          long c = num(out, "code");
+          res.error(c == 0 ? 400 : (int) c, str(out, "error"));
+          return;
+        }
+        res.json(out);
+      }
+    });
+
+    http.route("POST", "/api/federation/accept", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, Object> out = fed.handleAccept(req.json());
+        if (out.containsKey("error")) {
+          long c = num(out, "code");
+          res.error(c == 0 ? 400 : (int) c, str(out, "error"));
+          return;
+        }
+        res.json(out);
+      }
+    });
+
+    http.route("POST", "/api/federation/deliver", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, String> headers = new LinkedHashMap<String, String>();
+        headers.put("x-fe-secret", req.header("x-fe-secret"));
+        headers.put("x-fe-instance", req.header("x-fe-instance"));
+        Map<String, Object> out = fed.handleDeliver(headers, req.json());
+        if (out.containsKey("error")) {
+          long c = num(out, "code");
+          res.error(c == 0 ? 400 : (int) c, str(out, "error"));
+          return;
+        }
+        res.json(out);
+      }
+    });
+
     http.route("GET", "/api/server-info", new Http.Handler() {
       public void handle(Http.Req req, Http.Res res) {
         Map<String, Object> me = requireMe(req, res);

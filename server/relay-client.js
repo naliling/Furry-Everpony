@@ -51,6 +51,18 @@ export function createRelayClient({ db, log, fed, version = '' }) {
     ).run(key, String(value ?? ''));
   }
 
+  /* 对外地址：本机开了「中转站」时，别人能连到的是隧道地址而不是 127.0.0.1 */
+  let publicUrl = '';
+
+  function setPublicUrl(raw) {
+    publicUrl = normalizeRelayUrl(raw) || '';
+    return publicUrl;
+  }
+
+  function inviteAddr() {
+    return publicUrl || url();
+  }
+
   function url() {
     return normalizeRelayUrl(meta('relay_url'));
   }
@@ -267,5 +279,5 @@ export function createRelayClient({ db, log, fed, version = '' }) {
     };
   }
 
-  return { url, setUrl, enabled, secret, register, heartbeat, send, pullOnce, start, stop, status };
+  return { url, setUrl, enabled, secret, register, heartbeat, send, pullOnce, start, stop, status, setPublicUrl, inviteAddr };
 }

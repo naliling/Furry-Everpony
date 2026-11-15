@@ -11,6 +11,7 @@ import { createLogger } from './log.js';
 import { createAi } from './ai.js';
 import { createFederation, normalizeAddr, parseInvite } from './federation.js';
 import { createRelayClient, normalizeRelayUrl } from './relay-client.js';
+import { createRelayHost } from './relay-host.js';
 import { collectAccount, openPackage, restoreAccount, sealPackage } from './backup.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -29,10 +30,11 @@ const MIME = {
   '.webp': 'image/webp',
 };
 
+/** 运行数据目录（数据库所在目录；Electron 下在 userData/data） */
+const DATA_DIR = dirname(process.env.FE_DB || join(homedir(), '.furry-everpony', 'data', 'everpony.db'));
+
 /** 上传文件目录：默认和数据库放一起（Electron 下在 userData/data/uploads），测试可注入临时目录 */
-const DEFAULT_UPLOAD_DIR =
-  process.env.FE_UPLOAD_DIR ||
-  join(dirname(process.env.FE_DB || join(homedir(), '.furry-everpony', 'data', 'everpony.db')), 'uploads');
+const DEFAULT_UPLOAD_DIR = process.env.FE_UPLOAD_DIR || join(DATA_DIR, 'uploads');
 
 const UPLOAD_MIME = {
   '.png': 'image/png',
@@ -60,7 +62,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.16.0.10.16';
+const VERSION = '2026.11.16.0.10.17';
 
 const NUMBER_RE = /^[1-9]\d{4,11}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 5–12 位数字，且不能以 0 开头');
@@ -132,6 +134,12 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
       log.warn('[relay] 启动失败', (e && e.message) || e);
     }
     try {
+      const hostRow = db.prepare("SELECT value FROM instance_meta WHERE key = 'host_relay'").get();
+      if (hostRow && hostRow.value === '1') relayHost.start().catch(() => {});
+    } catch (e) {
+      log.warn('[relay-host] 启动失败', (e && e.message) || e);
+    }
+    try {
       onebot.startOutLinks();
     } catch (e) {
       log.warn('[onebot] 启动后恢复反向连接失败', (e && e.message) || e);
@@ -192,7 +200,23 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
   fed.setRelay(relay);
   app.decorate('relay', relay);
 
+  /* 本机当中转站：家用宽带在多层 NAT 后面，端口映射走不通，
+     所以用「本地中继 + 免费出站隧道」把中继暴露成公网 https 地址，手机扫一下二维码就配好。 */
+  const relayHost = createRelayHost({
+    db,
+    log,
+    version: VERSION,
+    dataDir: DATA_DIR,
+    onUrl: (u) => relay.setPublicUrl(u),
+  });
+  app.decorate('relayHost', relayHost);
+
   app.addHook('onClose', async () => {
+    try {
+      await relayHost.stop();
+    } catch {
+      /* 已经停了 */
+    }
     try {
       relay.stop();
     } catch {
@@ -2935,6 +2959,23 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     if (invite.error) return reply.code(400).send({ error: invite.error });
     if (invite.number === me.number) return reply.code(400).send({ error: '这是你自己的邀请码' });
     const opts = { instanceId: invite.instanceId || '' };
+    /* 邀请码里带了中继地址：先把自己挂到中继上，再发握手。
+       原因是「对方回执打回我的地址」这条路在手机/内网里基本不通（NAT、防火墙都拦入站），
+       我先连上中继，对方连不上我时就能把回执丢进中继，我拉一下就到了。
+       用户自己的中继优先级更高，已经配了就不动。 */
+    let relayAuto = false;
+    if (invite.relay && invite.instanceId && !relay.enabled()) {
+      relay.setUrl(invite.relay);
+      relay.setPublicUrl(invite.relay);
+      relay.start();
+      const reg = await relay.register();
+      if (reg.ok) {
+        relayAuto = true;
+        log.info('[relay] 已按邀请码自动接入中继 ' + invite.relay);
+      } else {
+        log.warn('[relay] 用邀请码里的中继地址注册失败：' + (reg.error || ''));
+      }
+    }
     let last = null;
     for (const addr of invite.addrs) {
       const out = await fed.lookup(me, addr, invite.number);
@@ -2950,12 +2991,13 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
           friend: !!reqOut.friend,
           via: reqOut.via || 'direct',
           queued: !!reqOut.queued,
+          relayAuto,
         };
       }
       last = out;
     }
     /* 一个地址都连不上（或者邀请码里压根没有地址，只有中继）：
-       只要邀请码里带了实例 ID 并且我们配了中继，就把申请排进中继队列。 */
+       邀请码里带了中继地址就自动配上（用户不用自己去设置里抄一遍），再把申请排进中继队列。 */
     if (invite.instanceId && relay.enabled()) {
       const reqOut = await fed.sendRequest(me, '', invite.number, '通过邀请码添加', opts);
       if (!reqOut.error) {
@@ -2968,6 +3010,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
           friend: !!reqOut.friend,
           via: 'relay',
           queued: true,
+          relayAuto,
         };
       }
       return reply.code(reqOut.code || 502).send({ error: reqOut.error });
@@ -3058,6 +3101,32 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     relay.start();
     const reg = await relay.register();
     return { ok: true, ...relay.status(), registerError: reg.ok ? '' : reg.error || '' };
+  });
+
+  /** 本机当中转站：状态（开没开、当前公网地址、cloudflared 是否就绪） */
+  app.get('/api/relay/host', async (req, reply) => {
+    const me = requireAuth(req, reply);
+    if (!me) return;
+    return { ok: true, ...relayHost.status() };
+  });
+
+  /**
+   * 开/关「本机当中转站」。
+   * 第一次开启会下载 cloudflared（约 55MB，只需一次），再起隧道，可能要十几秒；
+   * 开启成功后把本机中继填成自己的中继地址（用户还没配过中继时），本机顺带也有了兜底能力。
+   */
+  app.post('/api/relay/host', async (req, reply) => {
+    const me = requireAuth(req, reply);
+    if (!me) return;
+    const parsed = z.object({ enabled: z.boolean() }).safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: 'enabled 必须是 true 或 false' });
+    const st = await relayHost.setEnabled(parsed.data.enabled);
+    if (parsed.data.enabled && !relay.status().url) {
+      relay.setUrl(st.localUrl);
+      relay.start();
+      relay.register().catch(() => {});
+    }
+    return { ok: true, ...st };
   });
 
   /* ----- 下面几个是「别的实例调过来」的接口 ----- */

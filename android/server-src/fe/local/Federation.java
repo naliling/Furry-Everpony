@@ -676,8 +676,11 @@ public final class Federation {
     long targetId = api.idOf(target);
     long mirrorId = api.idOf(mirror);
     if (api.friendsOf(targetId, mirrorId)) {
+      /* 已经是好友也要补发一次回执：对方可能重装/换实例/上次回执丢了，只回「已经是好友」它永远补不上 */
+      Map<String, Object> again = notifyAccepted(mirror, target);
       res.put("ok", Boolean.TRUE);
       res.put("already", Boolean.TRUE);
+      res.put("friend", Boolean.valueOf(Boolean.TRUE.equals(again.get("ok"))));
       return res;
     }
     if (hasPending(mirrorId, targetId)) {

@@ -51,6 +51,12 @@ function safeEqual(a, b) {
  */
 export function buildRelay({ dbFile = process.env.FE_RELAY_DB || join(homedir(), '.furry-everpony', 'relay.db'), log = console, version = '' } = {}) {
   mkdirSync(dirname(dbFile), { recursive: true });
+  // 中继数据库的父目录可能还不存在（首次跑中继的机器），先建出来
+  try {
+    mkdirSync(dirname(dbFile), { recursive: true });
+  } catch {
+    /* 目录已存在或无权限，交给下面报错 */
+  }
   const raw = new DatabaseSync(dbFile);
   raw.exec('PRAGMA journal_mode = WAL');
   raw.exec(`

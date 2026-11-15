@@ -3,6 +3,7 @@ import Icon from '../ui/icons.jsx';
 import { Avatar, Confirm, Empty, SkeletonList, Spinner, Toggle, toast } from '../ui/primitives.jsx';
 import { api, shrinkImage, SEND_MODE_KEY, NOTIFY_KEY, TOKEN_KEY, storageGet, storageSet, requestNotifyPermission, normalizeServerInfo } from '../lib/api.js';
 import { fmtSize, statusMeta } from '../lib/format.js';
+import { QrCode, QrScanner } from '../ui/qr.jsx';
 import {
   CHAT_BG_EVENT,
   addChatBgFiles,
@@ -652,16 +653,20 @@ function FederationCard({ token }) {
   const [addr, setAddr] = useState('');
   const [relayUrl, setRelayUrl] = useState('');
   const [relayBusy, setRelayBusy] = useState(false);
+  const [host, setHost] = useState(null);
+  const [scanRelay, setScanRelay] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
   const load = useCallback(async () => {
     try {
-      const [i, n] = await Promise.all([
+      const [i, n, h] = await Promise.all([
         api('/api/federation/info', { token }).catch(() => null),
         api('/api/federation/nearby', { token }).catch(() => ({ instances: [] })),
+        api('/api/relay/host', { token }).catch(() => null),
       ]);
       setInfo(i);
+      if (h) setHost(h);
       if (i?.publicAddr) setAddr(i.publicAddr);
       /* 只在第一次填进来，别把用户正在输入的内容每 6 秒覆盖掉 */
       setRelayUrl((old) => old || i?.relay?.url || '');
@@ -705,6 +710,21 @@ function FederationCard({ token }) {
       setErr(e.message);
     } finally {
       setRelayBusy(false);
+    }
+  };
+
+  const toggleHost = async (next) => {
+    setHost((old) => ({ ...(old || {}), enabled: next, state: next ? 'starting' : 'off' }));
+    try {
+      const out = await api('/api/relay/host', { method: 'POST', token, body: { enabled: next } });
+      setHost(out);
+      if (!next) toast('已关闭本机中转站', 'success');
+      else if (out.state === 'error') toast(out.error || '开启失败', 'error');
+      else if (out.url) toast('中转站已开：' + out.url, 'success');
+      else toast('正在启动隧道，十几秒后再看这里', 'success');
+    } catch (e) {
+      setHost((old) => ({ ...(old || {}), enabled: !next }));
+      toast(e.message, 'error');
     }
   };
 
@@ -787,8 +807,50 @@ function FederationCard({ token }) {
             <input className="input" placeholder="例如 relay.example.com:7800" value={relayUrl} onChange={(e) => setRelayUrl(e.target.value.trim())} />
           </div>
         </label>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setScanRelay(true)}><Icon name="qr" size={14} /> 扫码</button>
         <button type="button" className="btn btn-primary btn-sm" disabled={relayBusy} onClick={saveRelay}>{relayBusy ? <Spinner size={14} /> : null} 保存</button>
       </div>
+
+      {host ? (
+      <div className="settings-row">
+        <div className="settings-row-main">
+          <b><Icon name="link" size={16} /> 把这台电脑做成中转站</b>
+          <span>
+            {host?.state === 'running' && host?.url
+              ? '公网地址：' + host.url + '（手机扫下面的二维码就能填好）'
+              : host?.enabled
+                ? host.state === 'error'
+                  ? '开启失败：' + (host.error || '未知原因')
+                  : '正在启动隧道…第一次要下载约 55MB，稍等十几秒'
+                : '开着它，这台电脑就是一台公网中继：别的设备不在同一个网络也能加好友、发消息（电脑要一直开着）'}
+          </span>
+        </div>
+        <Toggle label="本机做中转站" checked={!!host?.enabled} onChange={toggleHost} />
+      </div>
+      ) : null}
+
+      {host?.url ? (
+        <div className="fed-host">
+          <div className="fed-host-main">
+            <b>手机扫这个码</b>
+            <span>扫完自动填好中继地址，不用手打</span>
+          </div>
+          <QrCode text={host.url} size={150} />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(host.url)}><Icon name="copy" size={14} /> 复制地址</button>
+        </div>
+      ) : null}
+
+      {scanRelay ? (
+        <QrScanner
+          title="扫电脑上的中转地址"
+          onClose={() => setScanRelay(false)}
+          onResult={(text) => {
+            setScanRelay(false);
+            setRelayUrl(String(text || '').trim());
+            toast('已扫到：' + text, 'success');
+          }}
+        />
+      ) : null}
 
       <div className="fed-row">
         <label className="field">

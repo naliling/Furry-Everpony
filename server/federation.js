@@ -197,7 +197,8 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
     for (const addr of v6Addresses()) if (!list.includes(addr)) list.push(addr);
     /* 局域网地址放最后：同一个 Wi-Fi 下（手机连家里路由器）也能靠邀请码直接加，不要求有公网 IPv6 */
     for (const addr of myAddresses()) if (!list.includes(addr)) list.push(addr);
-    const relayUrl = relay?.url?.() || '';
+    /* 邀请码里要写「别人能连到」的中继地址：本机自己当中转站时是隧道地址，不是 127.0.0.1 */
+    const relayUrl = (relay?.inviteAddr ? relay.inviteAddr() : '') || relay?.url?.() || '';
     /* 有中继时，即使一个能被连上的地址都没有（家用宽带没有公网地址、也没在同一 Wi-Fi），
        邀请码依然可用：对方会通过中继把申请排队投给我，我上线后自己拉。 */
     if (!list.length && !relayUrl) return null;
@@ -463,7 +464,19 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
       instance: String(body?.from_instance || ''),
     });
     if (mirror.conflict) return { code: 409, error: '这个号码在本实例已被占用' };
-    if (areFriends(target.id, mirror.id)) return { ok: true, already: true };
+    /* 已经是好友了：也要把回执再发一遍。
+       因为对方可能换了实例/清了库/上次回执丢了，只回「已经是好友」它那边永远补不上。 */
+    if (areFriends(target.id, mirror.id)) {
+      const targetRow = db
+        .prepare('SELECT id, number, nickname, avatar, remote_addr, remote_instance, remote_secret FROM accounts WHERE id = ?')
+        .get(target.id);
+      const mirrorRow = db
+        .prepare('SELECT id, number, nickname, avatar, remote_addr, remote_instance, remote_secret FROM accounts WHERE id = ?')
+        .get(mirror.id);
+      const again = await notifyAccepted(mirrorRow, targetRow);
+      if (!again.ok) log?.warn?.('[fed] 补发回执失败 ' + fromNumber + '：' + (again.error || ''));
+      return { ok: true, already: true, friend: again.ok };
+    }
 
     const dup = db
       .prepare("SELECT id FROM friend_requests WHERE from_id = ? AND to_id = ? AND status = 'pending'")
