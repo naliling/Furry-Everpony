@@ -3201,3 +3201,180 @@ body,
     margin: 0 auto;
   }
 }
+
+/* ---------------- 中心服务器：登录页服务器地址 ---------------- */
+.auth-server {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 6px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft, rgba(255, 255, 255, 0.03));
+}
+.auth-server-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.auth-server-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.84rem;
+  font-family: inherit;
+  outline: none;
+}
+.auth-server-input::placeholder { color: var(--text-dim); opacity: 0.75; }
+.auth-server-input:focus { background: rgba(127, 127, 127, 0.1); }
+.auth-server-go { flex: 0 0 auto; width: auto; min-width: 62px; }
+.auth-server-note {
+  margin: 0 0 12px;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+.auth-server-note.is-bad { color: var(--danger, #f87171); }
+
+/* ---------------- 加好友：号码优先 ---------------- */
+.af-main-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.af-main-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 44px;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+}
+.af-main-go {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 96px;
+  height: 44px;
+  padding: 0 18px;
+  white-space: nowrap;
+}
+.af-adv {
+  margin: 4px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.af-adv > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.af-adv > summary::-webkit-details-marker { display: none; }
+.af-adv > summary:hover { color: var(--text); }
+.af-adv-caret { margin-left: auto; transition: transform 0.16s ease; }
+.af-adv[open] .af-adv-caret { transform: rotate(180deg); }
+.af-adv-body {
+  padding: 2px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.af-adv-body .af-mine { margin-top: 0; }
+@media (max-width: 560px) {
+  .af-main-row { flex-wrap: wrap; }
+  .af-main-go { width: 100%; min-width: 0; }
+  .auth-server { flex-wrap: wrap; }
+  .auth-server-input { flex: 1 1 100%; order: 3; }
+}
+
+/* ---------------- 登录页：局域网服务器一键选择 ---------------- */
+.auth-lan {
+  margin: 12px 0 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--line);
+}
+.auth-lan-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+.auth-lan-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.auth-lan-item {
+  flex: 1 1 auto;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.auth-lan-item:hover { border-color: var(--brand); }
+.auth-lan-item b { font-size: 0.84rem; font-weight: 600; }
+.auth-lan-item span { font-size: 0.72rem; color: var(--text-dim); }
+
+/* ---------------- 设置页：给手机填的服务器地址 ---------------- */
+.settings-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  width: 100%;
+}
+.settings-server-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(127, 127, 127, 0.06);
+}
+.settings-server-item em {
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  flex: 0 0 auto;
+  min-width: 40px;
+}
+.settings-server-item code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+.settings-server-item .btn { flex: 0 0 auto; width: auto; }
+@media (max-width: 560px) {
+  .settings-server-item { flex-wrap: wrap; }
+  .settings-server-item code { flex: 1 1 100%; order: 3; }
+}

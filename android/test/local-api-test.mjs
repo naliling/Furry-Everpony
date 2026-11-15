@@ -361,6 +361,13 @@ try {
   const idxAfterLogout = await api('GET', '/');
   check('退出登录后首页不注入', !idxAfterLogout.data.includes('fe_token'), idxAfterLogout.data.slice(0, 200));
 
+  // ---- 中心服务器模式：登录页用的局域网服务器发现（不需要登录）----
+  const lan = await api('GET', '/api/discover/lan');
+  check('局域网发现接口 200', lan.status === 200, lan.status);
+  check('局域网发现返回 instances 数组', Array.isArray(lan.data.instances), lan.data);
+  const lanClean = (lan.data.instances || []).every((x) => x && typeof x.addr === 'string' && !('numbers' in x));
+  check('局域网发现不暴露账号名单', lanClean, lan.data.instances);
+
   // ---- 杀进程重开：等价于「从最近任务划掉再打开」的服务器侧 ----
   proc.kill();
   await new Promise((r) => setTimeout(r, 800));

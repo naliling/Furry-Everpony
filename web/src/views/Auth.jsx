@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Icon from '../ui/icons.jsx';
 import { Segmented, Spinner, Avatar, toast } from '../ui/primitives.jsx';
-import { api, loadAccounts, rememberAccount, forgetAccount } from '../lib/api.js';
+import { api, apiUrl, loadAccounts, rememberAccount, forgetAccount, serverBase, setServerBase } from '../lib/api.js';
 
 const THEMES = [
   { value: 'deep', label: '深空' },
@@ -33,7 +33,46 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [accountList, setAccountList] = useState(() => loadAccounts());
+  /* 中心服务器模式：留空连本机，填地址连那台公共服务器 */
+  const [serverInput, setServerInput] = useState(() => serverBase());
+  const [serverBusy, setServerBusy] = useState(false);
+  const [serverInfo, setServerInfo] = useState(null);
+  const [lanServers, setLanServers] = useState([]);
   const numberRef = useRef(null);
+
+  const probeServer = async (base) => {
+    setServerBusy(true);
+    try {
+      const res = await fetch((base || '') + '/api/health');
+      const data = await res.json();
+      if (!res.ok) throw new Error('bad');
+      setServerInfo({ ok: true, version: data.version || '', role: data.role || '' });
+    } catch {
+      setServerInfo({ ok: false, version: '' });
+    } finally {
+      setServerBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    probeServer(serverBase());
+    /* 没配服务器时自动找一下局域网里的服务器（手机不用手打 IP） */
+    if (!serverBase()) {
+      fetch(apiUrl('/api/discover/lan'))
+        .then((r) => (r.ok ? r.json() : { instances: [] }))
+        .then((d) => setLanServers(Array.isArray(d.instances) ? d.instances.filter((x) => x && x.addr) : []))
+        .catch(() => setLanServers([]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const applyServer = async () => {
+    const saved = setServerBase(serverInput);
+    setServerInput(saved);
+    setError('');
+    setCheck(null);
+    await probeServer(saved);
+  };
 
   useEffect(() => {
     setError('');
@@ -64,7 +103,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
       clearTimeout(timer);
       setChecking(false);
     };
-  }, [number, mode]);
+  }, [number, mode, serverInfo]);
 
   const onNumber = (v) => setNumber(v.replace(/\D/g, '').slice(0, 12));
 
@@ -211,6 +250,65 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
               {mode === 'login' ? '欢迎回来，用你的号码继续。' : '选一个 5–12 位号码，这就是你的身份。'}
             </p>
           </header>
+
+          <div className="auth-server">
+            <span className="auth-server-label">
+              <Icon name="wifi" size={14} />
+              服务器
+            </span>
+            <input
+              className="auth-server-input"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="留空 = 本机；自建服务器填 http://IP:7788"
+              value={serverInput}
+              onChange={(e) => setServerInput(e.target.value)}
+              onBlur={applyServer}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  applyServer();
+                }
+              }}
+            />
+            <button type="button" className="btn btn-ghost btn-sm auth-server-go" onClick={applyServer} disabled={serverBusy}>
+              {serverBusy ? <Spinner size={13} /> : '连接'}
+            </button>
+          </div>
+          <p className={'auth-server-note' + (serverInfo && !serverInfo.ok ? ' is-bad' : '')}>
+            {serverInfo
+              ? serverInfo.ok
+                ? '已连上 ' + (serverBase() || '本机') + (serverInfo.version ? ' · 版本 ' + serverInfo.version : '')
+                : '连不上 ' + (serverBase() || '本机') + '，检查地址或网络'
+              : '正在检查服务器…'}
+          </p>
+
+          {!serverBase() && lanServers.length ? (
+            <div className="auth-lan">
+              <span className="auth-lan-label">
+                <Icon name="wifi" size={13} />
+                局域网里发现 {lanServers.length} 台服务器，点一下就用手边的
+              </span>
+              <div className="auth-lan-list">
+                {lanServers.slice(0, 3).map((item) => (
+                  <button
+                    key={item.addr}
+                    type="button"
+                    className="auth-lan-item"
+                    onClick={async () => {
+                      setServerInput(item.addr);
+                      const saved = setServerBase(item.addr);
+                      setServerInput(saved);
+                      await probeServer(saved);
+                    }}
+                  >
+                    <b>{item.addr}</b>
+                    <span>{item.version || ''}{item.people ? ' · ' + item.people + ' 人' : ''}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <form className="auth-form" onSubmit={submit}>
             <label className="field">

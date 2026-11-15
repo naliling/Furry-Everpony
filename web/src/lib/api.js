@@ -47,6 +47,45 @@ function netOk() {
   }, 2000);
 }
 
+/* ---------- 服务器地址（中心服务器模式） ----------
+   留空 = 连本机（桌面端/手机本地服务端）；
+   填 http://1.2.3.4:7788 或 https://chat.example.com = 连那台公共服务器，
+   账号、号码、好友、消息就都归那台服务器管，和普通聊天软件一样。 */
+export const SERVER_KEY = 'fe_server';
+
+export function normalizeServerUrl(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  if (!/^https?:\/\//i.test(s)) s = 'http://' + s;
+  s = s.replace(/\/+$/, '');
+  if (!/^https?:\/\/[^/\s]+$/i.test(s)) return '';
+  return s;
+}
+
+export function serverBase() {
+  try {
+    return normalizeServerUrl(localStorage.getItem(SERVER_KEY) || '');
+  } catch {
+    return '';
+  }
+}
+
+export function setServerBase(raw) {
+  const s = normalizeServerUrl(raw);
+  try {
+    if (s) localStorage.setItem(SERVER_KEY, s);
+    else localStorage.removeItem(SERVER_KEY);
+  } catch {
+    /* 隐私模式忽略 */
+  }
+  return s;
+}
+
+/** 拼上当前服务器前缀：服务端路径一律走这里 */
+export function apiUrl(path) {
+  return serverBase() + path;
+}
+
 /* ---------- 网络 ---------- */
 export async function api(path, { method = 'GET', body, token } = {}) {
   const headers = {};
@@ -60,7 +99,7 @@ export async function api(path, { method = 'GET', body, token } = {}) {
   }
   let res;
   try {
-    res = await fetch(path, { method, headers, body: payload });
+    res = await fetch(apiUrl(path), { method, headers, body: payload });
   } catch {
     netFail('连不上服务器，正在重试');
     throw new Error('网络连接失败，请稍后重试');
@@ -81,7 +120,7 @@ export async function uploadFile(file, token, { timeout = 60000 } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(`/api/upload?name=${encodeURIComponent(name)}`, {
+    const res = await fetch(apiUrl(`/api/upload?name=${encodeURIComponent(name)}`), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
       body: file,
@@ -319,7 +358,7 @@ export function requestNotifyPermission() {
 export function mediaUrl(body) {
   if (!body) return '';
   if (body.startsWith('data:') || body.startsWith('blob:')) return body;
-  if (body.startsWith('/uploads/')) return body;
+  if (body.startsWith('/uploads/')) return apiUrl(body);
   return '';
 }
 

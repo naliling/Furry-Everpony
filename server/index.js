@@ -62,7 +62,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.16.0.10.17';
+const VERSION = '2026.11.16.0.10.18';
 
 const NUMBER_RE = /^[1-9]\d{4,11}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 5–12 位数字，且不能以 0 开头');
@@ -70,6 +70,18 @@ const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 5–12 位数�
 export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {}) {
   const app = Fastify({ logger: false, bodyLimit: 30 * 1024 * 1024 });
   app.decorate('db', db);
+  /* 中心服务器模式：客户端可能是桌面窗口（file://）、局域网页面或远程域名，
+     浏览器跨源时会先发 OPTIONS 预检。这里统一放行；鉴权仍然只认 Bearer token。 */
+  app.addHook('onRequest', async (req, reply) => {
+    reply.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    reply.header('Vary', 'Origin');
+    reply.header('Access-Control-Allow-Credentials', 'false');
+    reply.header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-FE-Secret, X-FE-Instance');
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
+    reply.header('Access-Control-Max-Age', '86400');
+    if (req.method === 'OPTIONS') return reply.code(204).send();
+    return undefined;
+  });
   const UPLOAD_DIR = uploadDir || DEFAULT_UPLOAD_DIR;
   mkdirSync(UPLOAD_DIR, { recursive: true });
   app.decorate('uploadDir', UPLOAD_DIR);
@@ -3034,6 +3046,22 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
       return { ok: true, publicAddr: fed.setPublicAddr(raw), autoAccept };
     }
     return { ok: true, publicAddr: fed.publicAddr(), autoAccept };
+  });
+
+  /* 登录页用：这台机器所在局域网里有哪些服务器可以连（不需要登录）。
+     只回地址和版本，不暴露任何账号信息——目的就是让手机端不用手打 IP。 */
+  app.get('/api/discover/lan', async () => {
+    try {
+      const list = (fed.nearby().instances || []).map((x) => ({
+        addr: x.addr,
+        version: x.version || '',
+        lastSeen: x.lastSeen || 0,
+        people: (x.numbers || []).length,
+      }));
+      return { instances: list };
+    } catch {
+      return { instances: [] };
+    }
   });
 
   app.get('/api/federation/nearby', async (req, reply) => {

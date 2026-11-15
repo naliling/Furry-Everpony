@@ -1,3 +1,28 @@
+# v2026.11.16.0.10.18 — 2026-11-16
+
+## 换成「一台服务器 + 输号码就加」：客户端可以连任意一台服务器
+
+上一版还是「每个实例各跑各的，靠邀请码/中转站互相找」。这一版把主干换成主流聊天软件的做法：**一台服务器、注册即用、号码就是身份、输号码就能加好友**，同时保留原来的自托管与实例互联（不配服务器就是本机自用，和以前一样）。
+
+- **服务端放开跨域**（`server/index.js`）：新增 onRequest 钩子统一回 `Access-Control-Allow-Origin`（回显来源，无来源用 `*`）、允许 `Authorization / Content-Type / X-FE-Secret / X-FE-Instance` 头、允许 GET/POST/PATCH/PUT/DELETE/OPTIONS，预检直接 204。这样网页版、手机 WebView、别的电脑的客户端都能连同一台服务器。
+- **客户端可以指定服务器**（`web/src/lib/api.js`）：新增 `serverBase() / setServerBase() / normalizeServerUrl() / apiUrl()`，所有请求（含上传、媒体地址）都拼在所选服务器上；登录状态按服务器各自保存。
+- **登录页加「服务器」一行**（`web/src/views/Auth.jsx`）：填地址点「连接」即探测 `/api/health` 显示「已连上 X · 版本 Y」；留空就是本机。没填服务器时会自动列出同一 Wi-Fi 下发现的服务器，点一下即连。
+- **加好友改成输号码**（`AddFriendModal`）：最上面就是一个号码输入框 + 「添加」按钮，回车即发；扫码 / 邀请码 / 跨网络这些旧路径收进「扫码 / 邀请码 / 跨网络（可选）」折叠里，不再是主流程。
+- **局域网服务器发现**：新增**不需要登录**的 `GET /api/discover/lan`（桌面与安卓同源实现），只回地址、版本、人数，不回任何账号名单，供登录页列出「同一个 Wi-Fi 下的服务器」。
+- **设置里给出可复制的服务器地址**（`Settings.jsx` → 实例互联）：局域网地址与公网地址各一行 + 复制按钮，方便把手机/别的电脑接过来。
+
+### 实测
+
+- 跨源预检：`OPTIONS /api/login` → 204，响应头含 `Access-Control-Allow-Headers: Authorization, Content-Type, X-FE-Secret, X-FE-Instance`。
+- 局域网发现：第二实例起在 7790，6 秒后 `GET /api/discover/lan` 返回 `{"instances":[{"addr":"192.168.18.69:7788","version":"...","people":7}]}`。
+- 端到端「填服务器 → 注册 → 进主界面」：在登录页填 `127.0.0.1:7790`，注册的新账号**只存在于那台服务器**（远程库 accounts 仅 1 行），本机库没有新账号。
+
+### 产物
+
+- 桌面单文件 exe：见文末（打包完成后补数字）。
+- 安卓 APK：`android/dist/FurryEverpony-2026.11.16.0.10.18.apk`（versionCode 101018）。
+- 测试：后端 13 套 RAN 501 PASS 501 FAIL 0 ERR 0；安卓 7 套 RAN 322 PASS 322 FAIL 0 ERR 0；合计 RAN 823 PASS 823 FAIL 0 ERR 0。
+
 # v2026.11.16.0.10.17 — 2026-11-16
 
 ## 一条中转站 + 一个二维码：跨网络加好友不用配任何东西

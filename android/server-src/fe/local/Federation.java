@@ -1408,6 +1408,30 @@ public final class Federation {
       }
     });
 
+    /* 登录页用：不需要登录就能看到同一 Wi-Fi 下有哪些服务器，手机端不用手打 IP */
+    http.route("GET", "/api/discover/lan", new Http.Handler() {
+      public void handle(Http.Req req, Http.Res res) {
+        Map<String, Object> out = out();
+        List<Object> list = new ArrayList<Object>();
+        Map<String, Object> nb = nearby();
+        Object raw = nb.get("instances");
+        if (raw instanceof List) {
+          for (Object o : (List<?>) raw) {
+            Map<String, Object> p = Json.obj(o);
+            Map<String, Object> m = out();
+            m.put("addr", p.get("addr"));
+            m.put("version", p.get("version"));
+            m.put("lastSeen", p.get("lastSeen"));
+            Object nums = p.get("numbers");
+            m.put("people", Integer.valueOf(nums instanceof List ? ((List<?>) nums).size() : 0));
+            list.add(m);
+          }
+        }
+        out.put("instances", list);
+        res.json(out);
+      }
+    });
+
     http.route("GET", "/api/federation/nearby", new Http.Handler() {
       public void handle(Http.Req req, Http.Res res) {
         Map<String, Object> me = api.requireMeOf(req, res);

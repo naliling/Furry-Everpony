@@ -744,6 +744,36 @@ function FederationCard({ token }) {
       <header className="settings-card-head"><h3><Icon name="link" size={17} /> 实例互联</h3></header>
       <p className="settings-hint">每个实例就是一台电脑上的独立服务。把自己的地址给对方、把对方的地址填进来，就能跨实例加好友、聊天，不需要任何中心服务器。</p>
 
+      {/* 中心服务器模式：手机/别的电脑在登录页填这里显示的地址，就都连到这台服务器 */}
+      <div className="settings-row settings-row-server">
+        <div className="settings-row-main">
+          <b><Icon name="wifi" size={16} /> 手机/别的电脑连我这台服务器</b>
+          <span>
+            登录页的「服务器」里填下面这条，然后用自己的号码登录：同一个 Wi-Fi 填局域网地址，不同网络填公网地址。
+          </span>
+          <div className="settings-server-list">
+            {info?.myAddresses?.[0] ? (
+              <div className="settings-server-item">
+                <em>局域网</em>
+                <code>{info.myAddresses[0]}</code>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(info.myAddresses[0])}>
+                  <Icon name="copy" size={13} /> 复制
+                </button>
+              </div>
+            ) : null}
+            {host?.url || info?.relay?.publicUrl ? (
+              <div className="settings-server-item">
+                <em>公网</em>
+                <code>{host?.url || info?.relay?.publicUrl}</code>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(host?.url || info?.relay?.publicUrl)}>
+                  <Icon name="copy" size={13} /> 复制
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
       <div className="settings-row">
         <div className="settings-row-main">
           <b><Icon name="link" size={16} /> 我的实例地址</b>

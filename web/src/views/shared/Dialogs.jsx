@@ -221,6 +221,40 @@ export function AddFriendModal({ token, onClose, onChanged }) {
 
   return (
     <Modal title="加好友" icon="friend" onClose={onClose} width={520}>
+      <label className="field af-main">
+        <span className="field-label">对方号码</span>
+        <div className="af-main-row">
+          <input
+            className="input af-main-input"
+            inputMode="numeric"
+            autoFocus
+            value={input}
+            onChange={(e) => { setInput(e.target.value); setErr(''); setDone(null); setFound(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
+            placeholder="输入对方号码，例如 3881756548"
+          />
+          <button type="button" className="btn btn-primary af-main-go" disabled={!target || busy || !!done} onClick={() => submit()}>
+            {busy ? <Spinner size={15} /> : <Icon name="plus" size={16} />} 添加
+          </button>
+        </div>
+        <span className="field-hint">
+          {target?.kind === 'invite'
+            ? '识别为邀请码，一步就能加'
+            : target?.kind === 'remote'
+              ? '识别为跨网络：地址 ' + target.addr + '，号码 ' + target.number
+              : target?.kind === 'local'
+                ? '号码 ' + target.number + '，点「添加」就发出申请'
+                : '输号码就行，点「添加」；对方在别的服务器或别的网络时，展开下面「扫码 / 邀请码 / 跨网络」'}
+        </span>
+      </label>
+
+      <details className="af-adv">
+        <summary>
+          <Icon name="qr" size={14} />
+          <span>扫码 / 邀请码 / 跨网络（可选）</span>
+          <Icon name="chevronDown" size={14} className="af-adv-caret" />
+        </summary>
+        <div className="af-adv-body">
       <div className="af-mine">
         <div className="af-mine-row">
           <div>
@@ -314,6 +348,9 @@ export function AddFriendModal({ token, onClose, onChanged }) {
           ))}
         </div>
       ) : null}
+
+        </div>
+      </details>
 
       {target && target.kind !== 'invite' ? (
         <label className="field">

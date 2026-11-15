@@ -148,6 +148,33 @@ try {
 
   const outsiderBot = await call('POST', '/api/friends/reject', { token: c.data.token, body: { requestId: botRequestId2 } });
   check('不相干的人处理别人的 Bot 申请 404', outsiderBot.status === 404);
+
+  /* ---------- 中心服务器模式：跨源访问 + 局域网服务器发现 ---------- */
+  console.log('中心服务器模式');
+  const preflight = await fetch(base + '/api/login', {
+    method: 'OPTIONS',
+    headers: {
+      Origin: 'http://192.168.1.50:5173',
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'authorization,content-type',
+    },
+  });
+  check('跨源预检 204', preflight.status === 204, String(preflight.status));
+  check('预检回显来源', preflight.headers.get('access-control-allow-origin') === 'http://192.168.1.50:5173', String(preflight.headers.get('access-control-allow-origin')));
+  check('预检允许 Authorization 头', /authorization/i.test(preflight.headers.get('access-control-allow-headers') || ''));
+  check('预检允许 POST', /POST/i.test(preflight.headers.get('access-control-allow-methods') || ''));
+
+  const crossOrigin = await fetch(base + '/api/health', { headers: { Origin: 'http://10.0.0.9:8080' } });
+  check('普通请求也带跨源头', crossOrigin.headers.get('access-control-allow-origin') === 'http://10.0.0.9:8080', String(crossOrigin.headers.get('access-control-allow-origin')));
+  check('health 仍正常', crossOrigin.status === 200);
+
+  const lan = await call('GET', '/api/discover/lan');
+  check('局域网发现不需要登录', lan.status === 200 && Array.isArray(lan.data.instances), JSON.stringify(lan.data));
+  const lanShape = (lan.data.instances || []).every((x) => typeof x.addr === 'string' && !('numbers' in x));
+  check('局域网发现只回地址不暴露账号', lanShape, JSON.stringify(lan.data.instances));
+
+  const meAcross = await call('GET', '/api/me', { token: A });
+  check('跨源场景登录态照常可用', meAcross.status === 200 && meAcross.data.account?.number === '10001', JSON.stringify(meAcross.data));
 } catch (err) {
   failures.push('异常: ' + err.message);
   console.error(err);
