@@ -1,3 +1,20 @@
+# v2026.11.15.0.10.14 — 2026-11-16
+
+## 修掉「附近的实例」里混进自己
+
+- 现象：加好友弹窗「同一个 Wi-Fi 下的实例」里会出现本机自己的地址（192.168.x.x:7788），点「加」等于给自己发好友申请。
+- 根因：实例重启后 instanceId 可能变（换数据库/换网卡），只靠 instanceId 判自身会漏；UDP 广播来源是本机地址时也被当成别人。
+- 修法：
+  - 前端 web/src/views/shared/Dialogs.jsx 除了比 instanceId，还把 publicAddr / myAddresses / lanUrls 归一化成地址集合，地址命中的一律不算「附近的实例」。
+  - 服务端 server/federation.js 的 onAnnounce 增加兜底：广播来源地址等于本机监听地址时直接丢弃。
+
+### 产物
+
+- 桌面 exe：release/FurryEverpony-2026.11.15.0.10.14.exe，160,539,005 字节，sha256 424789bb36a46a717d1c65569ebc91f1fa6bf26a5047cd094cf4f3378ead3490；启动器 139,264 字节（含 0.10.14），载荷 version=2026.11.15.0.10.14，web assets index-DblJUD_L.js / index-DuLawIYr.css。
+- 安卓 APK：android/dist/FurryEverpony-2026.11.15.0.10.14.apk，874,115 字节，sha256 fabeb3f89ddf2fb16ddf54e97c483e6d305bd10783bafa1dde930dd67867f034，versionCode 101014。
+- 已分发到桌面与 Downloads 的 FurryEverpony.exe / FurryEverpony.apk，哈希与上面一致；/apk 路由返回 200、874,115 字节。
+- 测试：后端 11 套 RAN 435 PASS 435 FAIL 0 ERR 0（api 25、backup 35、features 25、federation 75、groups 36、im 78、link 18、model 37、offline 28、onebot-plus 62、onebot 16）；安卓 5 套 RAN 266 PASS 266 FAIL 0 ERR 0（local-api 133、boot-login 28、shim 31、apk 29、federation 45）。合计 RAN 701 PASS 701 FAIL 0 ERR 0。
+
 # v2026.11.15.0.10.13 — 2026-11-15
 
 ## 加好友不再麻烦：自动通过 + 附近的人一键加

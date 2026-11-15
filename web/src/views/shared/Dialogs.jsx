@@ -76,7 +76,17 @@ export function AddFriendModal({ token, onClose, onChanged }) {
       ]);
       if (!alive) return;
       setInfo(i2);
-      setNearby(((n && n.instances) || []).filter((x) => x.instanceId !== i2?.instanceId && x.addr));
+      /* 排除自己：instanceId 相同的是自己；地址等于本机监听地址的也是自己（换网卡/重启后 instanceId 可能变），
+         这种卡片点「加」等于加自己，必须挡掉 */
+      const mine = new Set(
+        [i2?.publicAddr, ...(i2?.myAddresses || []), ...(i2?.lanUrls || [])]
+          .filter(Boolean)
+          .map((a) => String(a).replace(/^https?:\/\//, '').replace(/\/+$/, '')),
+      );
+      const list = ((n && n.instances) || []).filter(
+        (x) => x && x.addr && x.instanceId !== i2?.instanceId && !mine.has(String(x.addr).replace(/^https?:\/\//, '')),
+      );
+      setNearby(list);
     };
     load();
     api('/api/federation/invite', { token })

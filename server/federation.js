@@ -628,6 +628,10 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
 
   function onAnnounce(msg, rinfo) {
     if (!msg || msg.fe !== 1 || !msg.instanceId || msg.instanceId === instanceId()) return;
+    /* 本机地址发出来的广播当成自己（同一台机器起过两个实例、或 instanceId 变过时会漏进来），
+       这种「附近的实例」点加就是加自己，直接丢掉 */
+    const fromAddr = rinfo.address + ':' + (Number(msg.port) || DEFAULT_PORT);
+    if (myAddresses().includes(fromAddr)) return;
     const addr = rinfo.address + ':' + (Number(msg.port) || DEFAULT_PORT);
     const prev = peers.get(msg.instanceId);
     const peer = prev || { instanceId: msg.instanceId, numbers: [], numbersAt: 0 };
