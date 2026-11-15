@@ -4,245 +4,212 @@ import { Modal, Avatar, Empty, Spinner, toast } from '../../ui/primitives.jsx';
 import { api } from '../../lib/api.js';
 import { fmtClock, fmtDate, relTime } from '../../lib/format.js';
 
-/* ---------------- 加好友（同实例号码 / 跨实例） ---------------- */
+/* ---------------- 加好友（一个输入框：邀请码 / 地址+号码 / 号码） ---------------- */
+
+const FED_PREFIX = 'FEINV1.';
+
+/** 手机上用 http 打开页面时没有 navigator.clipboard，得退回老办法，否则复制按钮点了没反应 */
+async function copyText(text) {
+  const value = String(text || '');
+  if (!value) return false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    /* 继续走兜底 */
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = value;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, value.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 把粘进来的一段话拆成「邀请码」「地址 + 号码」「号码」三种之一 */
+function parseTarget(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  const compact = text.replace(/\s+/g, '');
+  if (compact.toUpperCase().startsWith(FED_PREFIX)) return { kind: 'invite', code: compact };
+  const tokens = text.split(/[\s,，;；|]+/).filter(Boolean);
+  let addr = '';
+  let number = '';
+  for (const tk of tokens) {
+    if (/^[1-9]\d{4,11}$/.test(tk)) number = tk;
+    else if (/^(https?:\/\/)?([A-Za-z0-9.\-]+|\[[0-9a-fA-F:]+\])(:\d{1,5})?\/?$/.test(tk)) addr = tk;
+  }
+  if (!number) return null;
+  return addr ? { kind: 'remote', addr, number } : { kind: 'local', number };
+}
+
 export function AddFriendModal({ token, onClose, onChanged }) {
-  const [tab, setTab] = useState('local');
-  const [number, setNumber] = useState('');
+  const [input, setInput] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const valid = /^\d{5,12}$/.test(number);
+  const [err, setErr] = useState('');
+  const [found, setFound] = useState(null);
+  const [done, setDone] = useState(null);
+  const [info, setInfo] = useState(null);
+  const [nearby, setNearby] = useState([]);
+  const [invite, setInvite] = useState(null);
+  const [inviteErr, setInviteErr] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const [i2, n] = await Promise.all([
+        api('/api/federation/info', { token }).catch(() => null),
+        api('/api/federation/nearby', { token }).catch(() => ({ instances: [] })),
+      ]);
+      if (!alive) return;
+      setInfo(i2);
+      setNearby(((n && n.instances) || []).filter((x) => x.instanceId !== i2?.instanceId && x.addr));
+    };
+    load();
+    api('/api/federation/invite', { token })
+      .then((out) => { if (alive) { setInvite(out); setInviteErr(''); } })
+      .catch((e) => { if (alive) { setInvite(null); setInviteErr(e.message); } });
+    const timer = setInterval(load, 6000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [token]);
+
+  const myAddr = info?.publicAddr || info?.myAddresses?.[0] || info?.lanUrls?.[0] || '';
+  const target = parseTarget(input);
+
+  const copy = async (text, label) => {
+    const ok = await copyText(text);
+    if (ok) toast(label + '已复制', 'success');
+    else toast('复制失败，长按选中那串文字手动复制', 'error');
+  };
+
+  const paste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) { setInput(text.trim()); setDone(null); setErr(''); return; }
+    } catch {
+      /* http 页面读不了剪贴板 */
+    }
+    toast('长按输入框粘贴，或者手动输入', 'info');
+  };
 
   const submit = async () => {
-    if (!valid || busy) return;
+    if (!target || busy) return;
     setBusy(true);
+    setErr('');
+    setFound(null);
+    setDone(null);
     try {
-      await api('/api/friends/request', { method: 'POST', token, body: { number, message: message.trim() } });
-      toast('好友申请已发出', 'success');
-      onChanged?.();
-      onClose();
-    } catch (err) {
-      toast(err.message, 'error');
+      if (target.kind === 'invite') {
+        const data = await api('/api/federation/invite/accept', { method: 'POST', token, body: { code: target.code } });
+        const acc = data.account || {};
+        onChanged?.();
+        if (data.requested) {
+          setDone({ name: acc.nickname || acc.number, number: acc.number, text: '已向对方发出好友申请，同意后就能聊天' });
+        } else {
+          setFound({ ...data, addr: data.addr });
+          setErr(data.requestError || '找到对方了，但好友申请没发出去，再点一次「发送好友申请」');
+        }
+        return;
+      }
+
+      if (target.kind === 'remote') {
+        const data = await api('/api/federation/lookup', { method: 'POST', token, body: { addr: target.addr, number: target.number } });
+        const acc = data.account || {};
+        setFound({ ...data, addr: target.addr });
+        if (data.isFriend) { setDone({ name: acc.nickname || acc.number, number: acc.number, text: '你们已经是好友了' }); return; }
+        if (data.hasPending) { setDone({ name: acc.nickname || acc.number, number: acc.number, text: '之前已经申请过了，等对方同意' }); return; }
+        await api('/api/federation/request', { method: 'POST', token, body: { addr: target.addr, number: target.number, message: message.trim() } });
+        onChanged?.();
+        setDone({ name: acc.nickname || acc.number, number: acc.number, text: '已发出好友申请，对方在 ' + target.addr + ' 上' });
+        return;
+      }
+
+      /* 只填了号码：先当本机号码加；本机没有就去同一个 Wi-Fi 下发现的实例里找 */
+      try {
+        await api('/api/friends/request', { method: 'POST', token, body: { number: target.number, message: message.trim() } });
+        onChanged?.();
+        setDone({ name: target.number, number: target.number, text: '好友申请已发出，等对方同意' });
+        return;
+      } catch (e) {
+        if (!/没有这个号码/.test(e.message) || !nearby.length) throw e;
+        let hit = null;
+        for (const item of nearby) {
+          try {
+            const out = await api('/api/federation/lookup', { method: 'POST', token, body: { addr: item.addr, number: target.number } });
+            if (out.account) { hit = { addr: item.addr, out }; break; }
+          } catch {
+            /* 这个实例没有就试下一个 */
+          }
+        }
+        if (!hit) throw e;
+        const acc = hit.out.account || {};
+        setFound({ ...hit.out, addr: hit.addr });
+        await api('/api/federation/request', { method: 'POST', token, body: { addr: hit.addr, number: target.number, message: message.trim() } });
+        onChanged?.();
+        setDone({ name: acc.nickname || acc.number, number: acc.number, text: '在同一个 Wi-Fi 的 ' + hit.addr + ' 上找到对方，好友申请已发出' });
+      }
+    } catch (e) {
+      setErr(e.message);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <Modal title="加好友" icon="friend" onClose={onClose} width={460}>
-      <div className="segmented af-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === 'local'} className={tab === 'local' ? 'on' : ''} onClick={() => setTab('local')}>同一台服务器</button>
-        <button type="button" role="tab" aria-selected={tab === 'remote'} className={tab === 'remote' ? 'on' : ''} onClick={() => setTab('remote')}>别的服务器 / 别人的电脑</button>
-      </div>
-
-      {tab === 'local' ? (
-        <>
-          <label className="field">
-            <span className="field-label">对方号码</span>
-            <div className="input-wrap">
-              <Icon name="hash" size={16} className="input-lead" />
-              <input
-                className="input input-number"
-                inputMode="numeric"
-                placeholder="5–12 位数字"
-                value={number}
-                onChange={(e) => setNumber(e.target.value.replace(/\D/g, '').slice(0, 12))}
-                onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
-              />
-            </div>
-          </label>
-          <label className="field">
-            <span className="field-label">验证消息（可选）</span>
-            <textarea className="textarea" rows={3} maxLength={120} placeholder="让对方知道你是谁" value={message} onChange={(e) => setMessage(e.target.value)} />
-          </label>
-          <div className="modal-foot">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
-            <button type="button" className="btn btn-primary" disabled={!valid || busy} onClick={submit}>
-              {busy ? <Spinner size={15} /> : <Icon name="send" size={16} />} 发送申请
-            </button>
+    <Modal title="加好友" icon="friend" onClose={onClose} width={520}>
+      <div className="af-mine">
+        <div className="af-mine-row">
+          <div>
+            <b>我的实例地址</b>
+            <span>{myAddr || '还没探测到，可以在「设置 → 实例互联」里手动填公网地址'}</span>
           </div>
-        </>
-      ) : (
-        <CrossInstanceAdd token={token} onClose={onClose} onChanged={onChanged} />
-      )}
-    </Modal>
-  );
-}
-
-/* 跨实例：先选一个附近实例或手填地址，查号码 → 看资料 → 发申请 */
-function CrossInstanceAdd({ token, onClose, onChanged }) {
-  const [info, setInfo] = useState(null);
-  const [nearby, setNearby] = useState([]);
-  const [addr, setAddr] = useState('');
-  const [number, setNumber] = useState('');
-  const [message, setMessage] = useState('');
-  const [found, setFound] = useState(null);
-  const [busy, setBusy] = useState(null);
-  const [err, setErr] = useState('');
-  const [mode, setMode] = useState('invite');
-  const [myInvite, setMyInvite] = useState(null);
-  const [inviteErr, setInviteErr] = useState('');
-  const [inviteInput, setInviteInput] = useState('');
-  const validNumber = /^\d{5,12}$/.test(number);
-
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const [i, n] = await Promise.all([
-          api('/api/federation/info', { token }).catch(() => null),
-          api('/api/federation/nearby', { token }).catch(() => ({ instances: [] })),
-        ]);
-        if (!alive) return;
-        setInfo(i);
-        const list = (n.instances || []).filter((x) => x.instanceId !== i?.instanceId);
-        setNearby(list);
-      } catch {
-        /* 忽略 */
-      }
-    };
-    load();
-    loadInvite();
-    /* 附近实例是 UDP 广播发现的，隔几秒刷新一次就能看到刚上线的电脑 */
-    const timer = setInterval(load, 5000);
-    return () => { alive = false; clearInterval(timer); };
-  }, [token]);
-
-  const myAddr = info?.publicAddr || info?.myAddresses?.[0] || '';
-
-  /* 我的邀请码：进弹窗就取一次，点了「换一个」再取（地址可能刚变） */
-  const loadInvite = async () => {
-    try {
-      const out = await api('/api/federation/invite', { token });
-      setMyInvite(out);
-      setInviteErr('');
-    } catch (e) {
-      setMyInvite(null);
-      setInviteErr(e.message);
-    }
-  };
-
-  const copyInvite = async () => {
-    if (!myInvite?.code) return;
-    try {
-      await navigator.clipboard.writeText(myInvite.code);
-      toast('邀请码已复制，发给对方就行', 'success');
-    } catch {
-      toast('复制失败，手动全选这串文字', 'error');
-    }
-  };
-
-  /* 粘贴对方邀请码 → 解析出地址和号码 → 直接查资料 */
-  const acceptInvite = async () => {
-    const code = inviteInput.trim();
-    if (!code) return;
-    setErr('');
-    setFound(null);
-    setBusy('invite');
-    try {
-      const data = await api('/api/federation/invite/accept', { method: 'POST', token, body: { code } });
-      setFound({ ...data, addr: data.addr });
-      setNumber(data.account?.number || '');
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const copyMy = async () => {
-    if (!myAddr) return;
-    try {
-      await navigator.clipboard.writeText(myAddr);
-      toast('已复制我的地址：' + myAddr, 'success');
-    } catch {
-      toast(myAddr, 'success');
-    }
-  };
-
-  const lookup = async (target) => {
-    const useAddr = target || addr;
-    setErr('');
-    setFound(null);
-    setBusy('lookup');
-    try {
-      const data = await api('/api/federation/lookup', { method: 'POST', token, body: { addr: useAddr, number } });
-      setFound({ ...data, addr: useAddr });
-      if (!addr) setAddr(useAddr);
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const sendRequest = async () => {
-    if (!found?.account) return;
-    setBusy('send');
-    setErr('');
-    try {
-      const out = await api('/api/federation/request', { method: 'POST', token, body: { addr: found.addr, number, message: message.trim() } });
-      toast(out?.pendingApproval ? '申请已送到，等对方同意' : '申请已发出', 'success');
-      onChanged?.();
-      onClose();
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <div className="fed-add">
-      <div className="fed-mode">
-        <button type="button" className={'fed-mode-btn' + (mode === 'invite' ? ' on' : '')} onClick={() => { setMode('invite'); setFound(null); setErr(''); }}>
-          <Icon name="qr" size={15} /> 不同网络（邀请码）
-        </button>
-        <button type="button" className={'fed-mode-btn' + (mode === 'addr' ? ' on' : '')} onClick={() => { setMode('addr'); setFound(null); setErr(''); }}>
-          <Icon name="link" size={15} /> 填地址
-        </button>
-      </div>
-
-      {mode === 'invite' ? (
-        <>
-          <div className="fed-mine fed-invite-mine">
-            <div>
-              <b>我的邀请码</b>
-              <span>{myInvite?.code ? '复制发给对方（微信/短信都行），对方粘进去就能找到你' : inviteErr || '正在生成…'}</span>
-            </div>
-            {myInvite?.code ? (
-              <div className="fed-invite-actions">
-                <button type="button" className="btn btn-primary btn-sm" onClick={copyInvite}><Icon name="copy" size={14} /> 复制</button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={loadInvite}><Icon name="refresh" size={14} /> 换一个</button>
-              </div>
-            ) : null}
-          </div>
-          {myInvite?.code ? <div className="fed-invite-code" title="这里只显示前面一截，点上面的「复制」拿到完整邀请码">{myInvite.code.slice(0, 64)}…</div> : null}
-          <label className="field">
-            <span className="field-label">对方发来的邀请码</span>
-            <textarea
-              className="textarea fed-invite-input"
-              rows={2}
-              value={inviteInput}
-              onChange={(e) => { setInviteInput(e.target.value.trim()); setFound(null); }}
-              placeholder="粘贴 FEINV1. 开头的那一整串"
-            />
-          </label>
-        </>
-      ) : (
-        <>
-      <div className="fed-mine">
-        <div>
-          <b>我的实例地址</b>
-          <span>{myAddr || '这台机器的地址还没探测出来，可以在「设置 → 实例互联」里手动填'}</span>
+          {myAddr ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => copy(myAddr, '地址')}><Icon name="copy" size={14} /> 复制</button> : null}
         </div>
-        {myAddr ? <button type="button" className="btn btn-ghost btn-sm" onClick={copyMy}><Icon name="copy" size={14} /> 复制</button> : null}
+        <div className="af-mine-row">
+          <div>
+            <b>我的邀请码</b>
+            <span>{invite?.code ? '复制发给对方（短信、聊天软件都行），对方粘进去一步就能加你' : inviteErr || '正在生成…'}</span>
+          </div>
+          {invite?.code ? <button type="button" className="btn btn-primary btn-sm" onClick={() => copy(invite.code, '邀请码')}><Icon name="copy" size={14} /> 复制</button> : null}
+        </div>
+        {invite?.code ? <textarea className="af-invite-code" readOnly rows={2} value={invite.code} onFocus={(e) => e.target.select()} /> : null}
       </div>
+
+      <label className="field">
+        <span className="field-label">对方的邀请码 / 地址 + 号码 / 号码</span>
+        <textarea
+          className="textarea af-input"
+          rows={2}
+          value={input}
+          onChange={(e) => { setInput(e.target.value); setErr(''); setDone(null); setFound(null); }}
+          placeholder={'三种都行：\nFEINV1.xxx 邀请码\n192.168.1.8:7788 700123\n700123（同一个实例）'}
+        />
+        <span className="field-hint">
+          {target?.kind === 'invite' ? '识别为邀请码，一步就能加'
+            : target?.kind === 'remote' ? '识别为跨实例：地址 ' + target.addr + '，号码 ' + target.number
+            : target?.kind === 'local' ? '识别为本实例号码 ' + target.number
+            : '粘贴对方发来的一整段也行，会自动认出来'}
+        </span>
+      </label>
 
       {nearby.length ? (
         <div className="fed-nearby">
-          <span className="field-label">同一个 Wi-Fi 下发现的实例</span>
+          <span className="field-label">同一个 Wi-Fi 下发现 {nearby.length} 个实例，点一下自动填地址</span>
           {nearby.map((item) => (
-            <button type="button" key={item.instanceId} className="fed-nearby-item" onClick={() => { setAddr(item.addr); setFound(null); }}>
+            <button type="button" key={item.instanceId} className="fed-nearby-item" onClick={() => { setInput(item.addr + ' '); setErr(''); setDone(null); }}>
               <Icon name="wifi" size={15} />
               <span className="fed-nearby-addr">{item.addr}</span>
               <span className="fed-nearby-meta">{item.version || ''}</span>
@@ -251,25 +218,12 @@ function CrossInstanceAdd({ token, onClose, onChanged }) {
         </div>
       ) : null}
 
-      <div className="fed-row">
+      {target && target.kind !== 'invite' ? (
         <label className="field">
-          <span className="field-label">对方实例地址</span>
-          <div className="input-wrap">
-            <Icon name="link" size={15} className="input-lead" />
-            <input className="input" placeholder="例如 192.168.1.8:7788" value={addr} onChange={(e) => { setAddr(e.target.value.trim()); setFound(null); }} />
-          </div>
+          <span className="field-label">验证消息（可选）</span>
+          <input className="input" maxLength={120} placeholder="让对方知道你是谁" value={message} onChange={(e) => setMessage(e.target.value)} />
         </label>
-        <label className="field">
-          <span className="field-label">对方号码</span>
-          <div className="input-wrap">
-            <Icon name="hash" size={15} className="input-lead" />
-            <input className="input input-number" inputMode="numeric" placeholder="5–12 位数字" value={number}
-              onChange={(e) => { setNumber(e.target.value.replace(/\D/g, '').slice(0, 12)); setFound(null); }} />
-          </div>
-        </label>
-      </div>
-        </>
-      )}
+      ) : null}
 
       {err ? <div className="auth-error">{err}</div> : null}
 
@@ -278,39 +232,29 @@ function CrossInstanceAdd({ token, onClose, onChanged }) {
           <Avatar number={found.account.number} nickname={found.account.nickname} avatar={found.account.avatar} size={44} />
           <div className="fed-found-main">
             <b>{found.account.nickname || found.account.number}</b>
-            <span>{found.account.number}{found.isFriend ? ' · 已经是好友' : found.hasPending ? ' · 已经申请过' : ' · ' + (found.account.bio || '这个人在另一个实例上')}</span>
+            <span>{found.account.number}{found.isFriend ? ' · 已经是好友' : found.hasPending ? ' · 已经申请过' : found.addr ? ' · 来自 ' + found.addr : ''}</span>
           </div>
         </div>
       ) : null}
 
-      {found?.account && !found.isFriend && !found.hasPending ? (
-        <label className="field">
-          <span className="field-label">验证消息（可选）</span>
-          <textarea className="textarea" rows={2} maxLength={120} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="让对方知道你是谁" />
-        </label>
+      {done ? (
+        <div className="af-done">
+          <Icon name="check" size={18} />
+          <div>
+            <b>{done.text}</b>
+            <span>{done.name} · {done.number}</span>
+          </div>
+        </div>
       ) : null}
 
       <div className="modal-foot">
-        <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
-        {!found?.account ? (
-          mode === 'invite' ? (
-            <button type="button" className="btn btn-primary" disabled={!inviteInput.trim() || busy === 'invite'} onClick={acceptInvite}>
-              {busy === 'invite' ? <Spinner size={15} /> : <Icon name="search" size={16} />} 用邀请码找他
-            </button>
-          ) : (
-            <button type="button" className="btn btn-primary" disabled={!validNumber || !addr || busy === 'lookup'} onClick={() => lookup()}>
-              {busy === 'lookup' ? <Spinner size={15} /> : <Icon name="search" size={16} />} 查这个号码
-            </button>
-          )
-        ) : found.isFriend || found.hasPending ? (
-          <button type="button" className="btn btn-ghost" onClick={onClose}>关闭</button>
-        ) : (
-          <button type="button" className="btn btn-primary" disabled={busy === 'send'} onClick={sendRequest}>
-            {busy === 'send' ? <Spinner size={15} /> : <Icon name="send" size={16} />} 发送申请
-          </button>
-        )}
+        <button type="button" className="btn btn-ghost" onClick={onClose}>{done ? '关闭' : '取消'}</button>
+        <button type="button" className="btn btn-ghost" onClick={paste}><Icon name="copy" size={15} /> 粘贴</button>
+        <button type="button" className="btn btn-primary" disabled={!target || busy || !!done} onClick={submit}>
+          {busy ? <Spinner size={15} /> : <Icon name="send" size={16} />} {target?.kind === 'invite' ? '用邀请码加好友' : '发送好友申请'}
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }
 

@@ -165,6 +165,8 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
     const pub = publicAddr();
     if (pub) list.push(pub);
     for (const addr of v6Addresses()) if (!list.includes(addr)) list.push(addr);
+    /* 局域网地址放最后：同一个 Wi-Fi 下（手机连家里路由器）也能靠邀请码直接加，不要求有公网 IPv6 */
+    for (const addr of myAddresses()) if (!list.includes(addr)) list.push(addr);
     if (!list.length) return null;
     const expiresAt = Date.now() + INVITE_TTL;
     const payload = { v: 1, a: list, n: me.number, k: String(me.nickname || ''), e: expiresAt };
@@ -185,10 +187,12 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
     };
   }
 
-  /** 本实例对外可查的账号（不含 Bot、不含远端镜像账号） */
+  /** 本实例对外可查的账号：普通用户 + 公开的 Bot（不含远端镜像账号） */
   function directory() {
     const rows = db
-      .prepare("SELECT number, nickname, avatar, type FROM accounts WHERE type = 'user' ORDER BY id")
+      .prepare(
+        "SELECT number, nickname, avatar, type FROM accounts WHERE type = 'user' OR (type = 'bot' AND is_public = 1) ORDER BY id",
+      )
       .all();
     return { instanceId: instanceId(), version, numbers: rows };
   }
@@ -202,7 +206,7 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
   }
 
   function anyAccountByNumber(number) {
-    return db.prepare('SELECT id, number, type FROM accounts WHERE number = ?').get(number);
+    return db.prepare('SELECT id, number, type, is_public FROM accounts WHERE number = ?').get(number);
   }
 
   function upsertRemote({ number, nickname, avatar, addr, instance }) {
@@ -334,7 +338,9 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
       return { code: 400, error: '号码格式不对' };
     }
     const target = anyAccountByNumber(number);
-    if (!target || target.type !== 'user') return { code: 404, error: '没有这个号码' };
+    // 允许加别的实例上的公开 Bot，私有 Bot 不对外
+    const joinable = !!target && (target.type === 'user' || (target.type === 'bot' && target.is_public === 1));
+    if (!joinable) return { code: 404, error: '没有这个号码' };
     if (fromNumber === number) return { code: 400, error: '不能加自己' };
 
     const mirror = upsertRemote({
@@ -513,7 +519,7 @@ export function createFederation({ db, log, port = DEFAULT_PORT, version = '', l
     const res = await callPeer(peer.addr, '/api/federation/directory', { timeout: 3000 });
     peer.numbersAt = Date.now();
     if (res.ok && Array.isArray(res.body?.numbers)) {
-      peer.numbers = res.body.numbers.filter((n) => n && n.type === 'user');
+      peer.numbers = res.body.numbers.filter((n) => n && (n.type === 'user' || n.type === 'bot'));
     }
   }
 

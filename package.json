@@ -1,6 +1,6 @@
 {
   "name": "furry-everpony",
-  "version": "2026.11.15.0.10.11",
+  "version": "2026.11.15.0.10.12",
   "description": "自托管的即时通讯软件：号码即账号，好友即关系，Bot 是一等公民",
   "private": true,
   "type": "module",

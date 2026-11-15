@@ -59,7 +59,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.15.0.10.11';
+const VERSION = '2026.11.15.0.10.12';
 
 const NUMBER_RE = /^[1-9]\d{4,11}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 5–12 位数字，且不能以 0 开头');
@@ -2620,17 +2620,9 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
           WHERE a.type = 'bot' AND a.is_public = 1
             AND (? = '' OR a.number LIKE ? OR a.nickname LIKE ?)
           ORDER BY a.id DESC
-          LIMIT ? OFFSET ?`,
+          LIMIT 200`,
       )
-      .all(q, like, like, limit, offset);
-
-    const total = db
-      .prepare(
-        `SELECT COUNT(*) AS c FROM accounts
-          WHERE type = 'bot' AND is_public = 1
-            AND (? = '' OR number LIKE ? OR nickname LIKE ?)`,
-      )
-      .get(q, like, like).c;
+      .all(q, like, like);
 
     const friendSet = new Set(
       db
@@ -2642,20 +2634,77 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
         .map((r) => r.other),
     );
 
+    const localBots = rows.map((b) => ({
+      number: b.number,
+      nickname: b.nickname,
+      bio: b.bio,
+      avatar: b.avatar || '',
+      online: onebot.isOnline(b.id),
+      added: b.added,
+      isFriend: friendSet.has(b.id),
+      isMine: b.id === me.id,
+      remote: false,
+      addr: '',
+      instance: '',
+    }));
+
+    // 别的实例上的公开 Bot：已加的远端好友所在实例 + 局域网里发现的实例
+    const addrs = [];
+    for (const r of db.prepare("SELECT remote_addr FROM accounts WHERE type = 'remote'").all()) {
+      const a = normalizeAddr(r.remote_addr);
+      if (a && !addrs.includes(a)) addrs.push(a);
+    }
+    try {
+      for (const inst of fed.nearby().instances || []) {
+        const a = normalizeAddr(inst.addr);
+        if (a && !addrs.includes(a)) addrs.push(a);
+      }
+    } catch {
+      /* 局域网发现没起来不影响本机列表 */
+    }
+
+    const remoteBots = [];
+    for (const addr of addrs.slice(0, 8)) {
+      try {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 4000);
+        const resp = await fetch(`http://${addr}/api/federation/bots`, { signal: ctl.signal });
+        clearTimeout(timer);
+        if (!resp.ok) continue;
+        const body = await resp.json();
+        for (const b of Array.isArray(body.bots) ? body.bots : []) {
+          const number = String(b.number || '');
+          if (!number) continue;
+          if (q && !number.includes(q) && !String(b.nickname || '').includes(q)) continue;
+          const local = findAccountByNumber(number);
+          remoteBots.push({
+            number,
+            nickname: String(b.nickname || ''),
+            bio: String(b.bio || ''),
+            avatar: String(b.avatar || ''),
+            online: false,
+            added: local ? 1 : 0,
+            isFriend: local ? friendSet.has(local.id) : false,
+            isMine: false,
+            remote: true,
+            addr,
+            instance: String(body.instanceId || addr),
+          });
+        }
+      } catch {
+        /* 某个实例连不上就跳过，不能让整个广场失败 */
+      }
+    }
+
+    const merged = localBots.concat(remoteBots);
     return {
-      total,
-      bots: rows.map((b) => ({
-        number: b.number,
-        nickname: b.nickname,
-        bio: b.bio,
-        online: onebot.isOnline(b.id),
-        added: b.added,
-        isFriend: friendSet.has(b.id),
-        isMine: b.id === me.id,
-      })),
+      total: merged.length,
+      bots: merged.slice(offset, offset + limit),
+      note: remoteBots.length
+        ? ''
+        : '暂时没发现别的实例上的 Bot：先和对方互加好友，或两台设备连同一个 Wi-Fi',
     };
   });
-
   app.patch('/api/bots/:number', async (req, reply) => {
     const me = requireAuth(req, reply);
     if (!me) return;
@@ -2860,7 +2909,17 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     let last = null;
     for (const addr of invite.addrs) {
       const out = await fed.lookup(me, addr, invite.number);
-      if (out.account) return { ...out, addr, tried: invite.addrs.length };
+      if (out.account) {
+        // 一步到位：解析出账号就顺手把好友申请发过去，用户不用再点第二次
+        const reqOut = await fed.sendRequest(me, addr, invite.number, '通过邀请码添加');
+        return {
+          ...out,
+          addr,
+          tried: invite.addrs.length,
+          requested: !reqOut.error,
+          requestError: reqOut.error || '',
+        };
+      }
       last = out;
     }
     return reply.code(last?.code || 404).send({
@@ -2915,11 +2974,33 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
 
   app.get('/api/federation/directory', async () => fed.directory());
 
+  /** 别的实例来拉本机的公开 Bot（跨实例 Bot 广场用，契约要和手机端一致） */
+  app.get('/api/federation/bots', async () => {
+    const rows = db
+      .prepare(
+        "SELECT number, nickname, bio, avatar FROM accounts WHERE type = 'bot' AND is_public = 1 ORDER BY id DESC LIMIT 200",
+      )
+      .all();
+    return {
+      instanceId: fed.instanceId(),
+      version: VERSION,
+      bots: rows.map((b) => ({
+        number: b.number,
+        nickname: b.nickname || '',
+        bio: b.bio || '',
+        avatar: b.avatar || '',
+        type: 'bot',
+      })),
+    };
+  });
+
   app.get('/api/federation/profile', async (req, reply) => {
     const number = String((req.query || {}).number || '');
     if (!NUMBER_RE.test(number)) return reply.code(400).send({ error: '号码格式不对' });
     const acc = db
-      .prepare("SELECT number, nickname, avatar, bio FROM accounts WHERE number = ? AND type = 'user'")
+      .prepare(
+        "SELECT number, nickname, avatar, bio, type FROM accounts WHERE number = ? AND (type = 'user' OR (type = 'bot' AND is_public = 1))",
+      )
       .get(number);
     if (!acc) return reply.code(404).send({ error: '对方没有这个号码' });
     return { account: { ...acc, remote: false, addr: '' }, instanceId: fed.instanceId(), version: VERSION };

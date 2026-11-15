@@ -12,6 +12,7 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
   }, [initialView]);
   const [q, setQ] = useState('');
   const [publicBots, setPublicBots] = useState(null);
+  const [plazaNote, setPlazaNote] = useState('');
   const [myBots, setMyBots] = useState(null);
   const [detail, setDetail] = useState(null);
   const [creating, setCreating] = useState(false);
@@ -23,6 +24,7 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
     try {
       const data = await api('/api/bots/public?q=' + encodeURIComponent(keyword) + '&limit=60', { token });
       setPublicBots(data.bots || []);
+      setPlazaNote(data.note || '');
     } catch (err) {
       setPublicBots([]);
       toast(err.message, 'error');
@@ -53,6 +55,15 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
       setDetail(null);
       onOpenConversation?.(data.conversationId);
     } catch (err) { toast(err.message, 'error'); }
+  };
+
+  const addRemoteBot = async (bot) => {
+    setBusy('add' + bot.number);
+    try {
+      await api('/api/federation/request', { method: 'POST', token, body: { addr: bot.addr, number: bot.number, message: '在 Bot 广场看到你，想聊两句' } });
+      toast('好友申请已发出，对方同意后就能聊天', 'success');
+      loadPublic(q.trim());
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(''); }
   };
 
   const switchToBot = async (bot) => {
@@ -102,7 +113,7 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
               </div>
             </div>
             {publicBots === null ? <SkeletonList rows={4} /> : plazaList.length === 0 ? (
-              <Empty icon="bot" title={q ? '没有找到匹配的 Bot' : '广场还没有公开的 Bot'} sub={q ? '换个关键词试试' : '创建 Bot 后打开公开，就会出现在广场'} />
+              <Empty icon="bot" title={q ? '没有找到匹配的 Bot' : '广场还没有公开的 Bot'} sub={q ? '换个关键词试试' : (plazaNote || '创建 Bot 后打开公开，就会出现在广场')} />
             ) : (
               <div className="bot-grid">
                 {plazaList.map((bot) => (
@@ -110,10 +121,10 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
                     <span className="bot-card-avatar"><Avatar number={bot.number} nickname={bot.nickname} avatar={bot.avatar} size={46} square /></span>
                     <span className="bot-card-main">
                       <span className="bot-card-name">{bot.nickname || bot.number}<span className="bot-card-online"><i className={bot.online ? 'on' : ''} /></span></span>
-                      <span className="bot-card-number">{bot.number}</span>
+                      <span className="bot-card-number">{bot.number}{bot.remote ? <span className="tag tag-accent">远程</span> : null}</span>
                       <span className="bot-card-bio">{bot.bio || '这个 Bot 还没有签名'}</span>
                     </span>
-                    <span className="bot-card-tag"><Icon name="bot" size={12} /> Bot</span>
+                    <span className="bot-card-tag"><Icon name={bot.remote ? 'link' : 'bot'} size={12} /> {bot.remote ? '跨实例' : 'Bot'}</span>
                   </button>
                 ))}
               </div>
@@ -161,6 +172,9 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
           me={me}
           bot={detail}
           own={mine.some((b) => b.number === detail.number)}
+          remote={!!detail.remote}
+          isFriend={!!detail.isFriend}
+          onAddRemote={() => addRemoteBot(detail)}
           initialTab={detail.__tab || 'overview'}
           onClose={() => setDetail(null)}
           onChat={() => dm(detail.number)}
@@ -168,6 +182,7 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
           onCopy={copy}
           onChanged={loadMine}
           busy={busy === 'switch' + detail.number}
+          adding={busy === 'add' + detail.number}
         />
       ) : null}
       {creating ? <CreateBotModal token={token} onClose={() => setCreating(false)} onCreated={(bot) => { setCreating(false); loadMine(); setDetail(bot); }} /> : null}
@@ -175,7 +190,7 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
   );
 }
 
-function BotDetail({ token, me, bot, own, initialTab = 'overview', onClose, onChat, onSwitch, onCopy, onChanged, busy }) {
+function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overview', onClose, onChat, onSwitch, onCopy, onChanged, onAddRemote, busy, adding }) {
   const [tab, setTab] = useState(own ? initialTab : 'overview');
   const [link, setLink] = useState(null);
   const [stats, setStats] = useState(null);
@@ -209,11 +224,17 @@ function BotDetail({ token, me, bot, own, initialTab = 'overview', onClose, onCh
         <Avatar number={bot.number} nickname={bot.nickname} avatar={bot.avatar} size={64} square />
         <div className="bot-detail-id">
           <h3>{bot.nickname || '未命名 Bot'}</h3>
-          <p className="bot-detail-number">{bot.number}<span className="tag">{own ? '我的 Bot' : 'Bot'}</span>{bot.public ? <span className="tag tag-accent">公开</span> : null}</p>
+          <p className="bot-detail-number">{bot.number}<span className="tag">{own ? '我的 Bot' : 'Bot'}</span>{bot.public ? <span className="tag tag-accent">公开</span> : null}{remote ? <span className="tag tag-accent">来自 {bot.addr || '别的实例'}</span> : null}</p>
           <p className="bot-detail-bio">{bot.bio || '这个 Bot 还没有签名'}</p>
         </div>
         <div className="bot-detail-actions">
-          <button type="button" className="btn btn-primary btn-sm" onClick={onChat}><Icon name="chat" size={15} /> 发消息</button>
+          {remote && !isFriend ? (
+            <button type="button" className="btn btn-primary btn-sm" disabled={adding} onClick={onAddRemote}>
+              {adding ? <Spinner size={14} /> : <Icon name="plus" size={15} />} 加好友后聊天
+            </button>
+          ) : (
+            <button type="button" className="btn btn-primary btn-sm" onClick={onChat}><Icon name="chat" size={15} /> 发消息</button>
+          )}
           {own ? <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={onSwitch}>{busy ? <Spinner size={14} /> : <Icon name="refresh" size={15} />} 切换为 Bot</button> : null}
         </div>
       </div>

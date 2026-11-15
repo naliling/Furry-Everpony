@@ -110,15 +110,21 @@ try {
     !plaza1.data.bots.some((x) => x.number === '200002'),
   );
 
+  /* 广场会把已知远端实例的公开 Bot 一起合并进来（跨实例），所以断言一律只看本机项（!remote） */
   const plazaSearch = await call('/api/bots/public?q=小马', { token: tb });
+  const searchLocal = plazaSearch.data.bots.filter((x) => !x.remote);
   check(
     '按名字搜到 Bot',
-    plazaSearch.data.bots.length === 1 && plazaSearch.data.bots[0].number === '200001',
-    `hits=${plazaSearch.data.bots.length}`,
+    searchLocal.length === 1 && searchLocal[0].number === '200001',
+    `hits=${searchLocal.length}`,
   );
 
   const plazaMiss = await call('/api/bots/public?q=不存在', { token: tb });
-  check('搜不到时返回空', plazaMiss.data.bots.length === 0 && plazaMiss.data.total === 0);
+  check(
+    '搜不到时返回空',
+    plazaMiss.data.bots.filter((x) => !x.remote).length === 0,
+    `local=${plazaMiss.data.bots.filter((x) => !x.remote).length}`,
+  );
 
   /* 4. 私有改公开 */
   const patched = await call('/api/bots/200002', {
@@ -127,10 +133,11 @@ try {
     body: { public: true },
   });
   const plaza2 = await call('/api/bots/public', { token: tb });
+  const local2 = plaza2.data.bots.filter((x) => !x.remote);
   check(
     'PATCH 改成公开后出现',
-    patched.status === 200 && plaza2.data.total === 2,
-    `status=${patched.status} body=${JSON.stringify(patched.data)} total=${plaza2.data.total}`,
+    patched.status === 200 && local2.length === 2,
+    `status=${patched.status} body=${JSON.stringify(patched.data)} local=${local2.length}`,
   );
 
   const patchOthers = await call('/api/bots/200001', {

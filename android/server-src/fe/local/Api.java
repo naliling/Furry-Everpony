@@ -29,6 +29,8 @@ public final class Api {
   private final int port;
   private final SecureRandom rnd = new SecureRandom();
   private final Map<String, long[]> typing = new LinkedHashMap<String, long[]>();
+  /** 实例互联：邀请码、跨实例好友、消息投递。 */
+  private Federation fed;
 
   public Api(Store store, File dataDir, String version, int port) {
     this.store = store;
@@ -612,6 +614,21 @@ public final class Api {
     put("messages", row);
     Map<String, Object> m = member(convId, meId);
     if (m != null) { m.put("last_read_id", id); store.markDirty(); }
+    // 对方在别的实例上：先落本地库（界面立刻可见），再进投递队列，由后台重试补投
+    if (g == null) {
+      Map<String, Object> peerBrief = peerOf(convId, meId);
+      if (peerBrief != null && "remote".equals(str(peerBrief, "type"))) {
+        Map<String, Object> full = account(num(peerBrief, "id"));
+        if (full != null) {
+          Map<String, Object> msg = new LinkedHashMap<String, Object>();
+          msg.put("kind", data.get("kind"));
+          msg.put("body", data.get("body"));
+          msg.put("meta", data.get("meta") == null ? "" : data.get("meta"));
+          msg.put("created_at", Long.valueOf(System.currentTimeMillis()));
+          fed.enqueue(convId, me, full, msg);
+        }
+      }
+    }
     Map<String, Object> out = new LinkedHashMap<String, Object>();
     out.put("id", id);
     return out;
@@ -634,6 +651,9 @@ public final class Api {
 
   public void register(final Http http) {
     new Groups(this, store, dataDir).register(http);
+    fed = new Federation(this, store, dataDir, port, version);
+    fed.register(http);
+    fed.start();
 
     http.route("GET", "/api/health", new Http.Handler() {
       public void handle(Http.Req req, Http.Res res) {
@@ -875,6 +895,8 @@ public final class Api {
           item.put("remark", str(f, "remark"));
           item.put("special", Boolean.valueOf(num(f, "special") != 0));
           item.put("group_id", num(f, "group_id"));
+          item.put("remote", Boolean.valueOf("remote".equals(str(a, "type"))));
+          item.put("addr", str(a, "remote_addr"));
           Map<String, Object> p = presenceOf(num(a, "id"));
           item.put("online", p.get("online"));
           item.put("last_seen", p.get("last_seen"));
@@ -1033,7 +1055,22 @@ public final class Api {
         String number = String.valueOf(b.get("number") == null ? "" : b.get("number"));
         String message = String.valueOf(b.get("message") == null ? "" : b.get("message"));
         Map<String, Object> t = accountByNumber(number);
-        if (t == null) { res.error(404, "没有这个号码"); return; }
+        if (t == null) {
+          // 本实例没有这个号码：带了实例地址就走跨实例握手
+          String addr = String.valueOf(b.get("addr") == null ? "" : b.get("addr")).trim();
+          if (!addr.isEmpty()) {
+            Map<String, Object> fedOut = fed.sendRequest(me, addr, number, message);
+            if (fedOut.containsKey("error")) {
+              long code = num(fedOut, "code");
+              res.error(code == 0 ? 400 : (int) code, String.valueOf(fedOut.get("error")));
+              return;
+            }
+            res.json(fedOut);
+            return;
+          }
+          res.error(404, "没有这个号码");
+          return;
+        }
         long meId = num(me, "id");
         long tid = num(t, "id");
         if (tid == meId) { res.error(400, "不能加自己"); return; }
@@ -1192,6 +1229,25 @@ public final class Api {
     if (num(row, "to_id") != num(me, "id")) { res.error(403, "这不是发给你的申请"); return; }
     if (!"pending".equals(str(row, "status"))) { res.error(409, "这条申请已经处理过了"); return; }
     if (accept) {
+      Map<String, Object> from = account(num(row, "from_id"));
+      if (from != null && "remote".equals(str(from, "type"))) {
+        // 跨实例：先让对方实例那边也建立好友，成功了再落本地，避免单边好友
+        Map<String, Object> r = fed.notifyAccepted(from, me);
+        if (!Boolean.TRUE.equals(r.get("ok"))) {
+          Object e = r.get("error");
+          res.error(502, e == null ? "对方实例没连上" : String.valueOf(e));
+          return;
+        }
+        row.put("status", "accepted");
+        store.markDirty();
+        store.save();
+        Map<String, Object> ok = new LinkedHashMap<String, Object>();
+        ok.put("ok", Boolean.TRUE);
+        ok.put("status", "accepted");
+        ok.put("remote", Boolean.TRUE);
+        res.json(ok);
+        return;
+      }
       makeFriends(num(row, "from_id"), num(row, "to_id"));
       row.put("status", "accepted");
     } else {
@@ -1809,11 +1865,17 @@ public final class Api {
         Map<String, Object> me = requireMe(req, res);
         if (me == null) return;
         Map<String, Object> out = new LinkedHashMap<String, Object>();
+        Map<String, Object> fedInfo = fed.info();
         out.put("version", version);
         out.put("port", port);
-        out.put("host", "127.0.0.1");
-        out.put("boundToLan", Boolean.FALSE);
-        out.put("lanUrls", new ArrayList<Object>());
+        out.put("host", "0.0.0.0");
+        out.put("boundToLan", Boolean.TRUE);
+        out.put("lanUrls", fedInfo.get("lanUrls"));
+        out.put("lanNames", new ArrayList<Object>());
+        out.put("publicV6", fedInfo.get("publicV6"));
+        out.put("instanceId", fedInfo.get("instanceId"));
+        out.put("publicAddr", fedInfo.get("publicAddr"));
+        out.put("myAddresses", fedInfo.get("myAddresses"));
         out.put("webReady", Boolean.TRUE);
         out.put("local", Boolean.TRUE);
         res.json(out);
@@ -1846,9 +1908,27 @@ public final class Api {
       public void handle(Http.Req req, Http.Res res) {
         Map<String, Object> me = requireMe(req, res);
         if (me == null) return;
+        String q = req.queryValue("q").trim().toLowerCase();
+        long meId = num(me, "id");
+        List<Object> bots = new ArrayList<Object>();
+        // 手机自己不跑 Bot，但别的实例（电脑版）上公开的 Bot 要能看到、能加
+        for (Map<String, Object> b : fed.remoteBots()) {
+          String number = str(b, "number");
+          String nickname = str(b, "nickname");
+          if (!q.isEmpty() && !number.toLowerCase().contains(q) && !nickname.toLowerCase().contains(q)) continue;
+          Map<String, Object> item = new LinkedHashMap<String, Object>(b);
+          Map<String, Object> local = accountByNumber(number);
+          item.put("added", Boolean.valueOf(local != null));
+          item.put("isFriend", Boolean.valueOf(local != null && areFriends(meId, num(local, "id"))));
+          item.put("isMine", Boolean.FALSE);
+          bots.add(item);
+        }
         Map<String, Object> out = new LinkedHashMap<String, Object>();
-        out.put("bots", new ArrayList<Object>());
-        out.put("note", "手机版不跑 Bot，Bot 请在电脑版使用");
+        out.put("total", bots.size());
+        out.put("bots", bots);
+        out.put("note", bots.isEmpty()
+            ? "暂时没发现别的实例上的 Bot：先和电脑版互加好友，或让两台设备连同一个 Wi-Fi"
+            : "");
         res.json(out);
       }
     });
@@ -1957,4 +2037,8 @@ public final class Api {
   String versionOf() { return version; }
   Map<String, Object> errMap(String message) { return err(message); }
   Map<String, Object> readMetaOf(String raw) { return readMeta(raw); }
+  boolean friendsOf(long a, long b) { return areFriends(a, b); }
+  void makeFriendsOf(long a, long b) { makeFriends(a, b); }
+  long dmOf(long a, long b) { return getOrCreateDm(a, b); }
+  Federation fedOf() { return fed; }
 }

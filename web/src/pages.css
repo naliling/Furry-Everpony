@@ -2827,3 +2827,96 @@ body,
     flex: 1 1 0;
   }
 }
+
+/* ---------- 加好友弹窗（单输入框：邀请码 / 地址+号码 / 号码） ---------- */
+.af-mine {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line));
+  background: color-mix(in srgb, var(--brand) 8%, var(--bg-input));
+}
+.af-mine-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.af-mine-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.af-mine-row b {
+  font-size: 0.84rem;
+}
+.af-mine-row span {
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--text-2);
+  word-break: break-all;
+}
+.af-mine-row > .btn {
+  flex: 0 0 auto;
+}
+.af-invite-code {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed color-mix(in srgb, var(--brand) 40%, var(--line));
+  background: var(--bg-app);
+  color: var(--text-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  resize: none;
+  word-break: break-all;
+}
+.af-input {
+  min-height: 64px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  resize: vertical;
+}
+.af-done {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--success) 42%, var(--line));
+  background: color-mix(in srgb, var(--success) 12%, var(--bg-input));
+}
+.af-done > svg {
+  flex: 0 0 auto;
+  color: var(--success);
+}
+.af-done > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.af-done b {
+  font-size: 0.86rem;
+  color: var(--text-1);
+}
+.af-done span {
+  font-size: 0.76rem;
+  color: var(--text-2);
+}
+@media (max-width: 560px) {
+  .af-mine-row {
+    flex-wrap: wrap;
+  }
+  .af-mine-row > .btn {
+    width: 100%;
+  }
+  .af-input {
+    min-height: 74px;
+  }
+}

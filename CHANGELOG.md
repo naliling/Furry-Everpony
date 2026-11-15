@@ -1,3 +1,45 @@
+# v2026.11.15.0.10.12 — 2026-11-15
+
+## 手机版补上跨实例（联邦）能力：终于能和电脑版互相加好友
+
+- **新增 `android/server-src/fe/local/Federation.java`（约 1080 行）**：协议与电脑版 `server/federation.js` 一比一 —— 邀请码 `FEINV1.` 生成/解析、`/api/federation/{info,lookup,request,handshake,accept,deliver,profile,directory,bots}`、`x-fe-secret` 常数时间校验、UDP 7799 广播发现、离线外发队列（4 秒一轮，失败退避 5→300 秒，60 次放弃）。安卓 min-api 24 没有 `java.util.Base64`，所以自己写了 base64url。
+- **手机不再显示「没有这个接口」**：原来 `Api.java` 里一条 `/api/federation/*` 都没有，未匹配的 `/api/*` 直接落 404「没有这个接口」，前端只能给红字。现在这些路由全部存在。
+- **手机实例地址显示真实值**：`GET /api/server-info` 原来硬编码 `host="127.0.0.1"`、`lanUrls=[]`、`boundToLan=false`，设置页与加好友弹窗拿不到地址。改成走 `fed.info()` 枚举真实网卡。
+- **手机 Bot 广场能看见电脑上的 Bot**：`GET /api/bots/public` 现在合并 `fed.remoteBots()`。
+- **手机好友列表**带 `remote`/`addr`；给远端好友发消息自动进联邦外发队列；同意远端申请前先 `notifyAccepted`，失败返回 502 而不是假装成功。
+
+## 电脑版：目录放宽到公开 Bot，Bot 广场跨实例
+
+- `directory()` 与握手判定放宽：普通用户 + 公开 Bot 都可被跨实例查到/添加（原来只认 `type='user'`）。
+- 新增无鉴权 `GET /api/federation/bots`，返回本实例公开 Bot 列表（最多 200 个），供别的实例抓取。
+- `POST /api/federation/invite/accept` 查到人之后**自动发出好友申请**，返回体带 `requested` / `requestError`。
+- `GET /api/bots/public` 重写为合并远端：本机公开 Bot + 最多 8 个已知远端实例的 Bot，远端项带 `remote/addr/instance`，并附 `note` 说明。
+
+## 加好友弹窗重写：一个输入框，三种写法都能认
+
+- 删掉「同一台服务器 / 别的服务器」两个标签页，只留一个输入框：**邀请码**、**地址 + 号码**、**纯号码**都能自动识别。
+- 弹窗顶部固定显示「我的实例地址」「我的邀请码」，各带复制按钮；手机上 `navigator.clipboard` 在 http 页面不可用，已退回 `textarea + execCommand('copy')`，长按也能选中整段。
+- 纯号码本地查不到时，会自动去附近实例逐个 `lookup`，再走跨实例申请，不再只报「没有这个号码」。
+
+## 修：电脑版邀请码在只有局域网时生成不出来
+
+- 现象：`GET /api/federation/invite` 返回 409「这台电脑还没有可以被外部连上的地址」，加好友弹窗里「我的邀请码」只能显示这句错误 —— 用户拿不到能发给手机的码。
+- 修法：`makeInvite` 的地址候选在公网地址、公网 IPv6 之后补上局域网地址（同一 Wi-Fi 下手机直连即可用）。
+- 实测：重启后 `/api/federation/invite` 返回 200，`addrs=["192.168.18.69:7788"]`，`boundToLan=true`；`test-federation` 仍 66/66。
+
+## 测试
+
+- 后端十一套 **RAN 426 PASS 426 FAIL 0 ERR 0**。
+- 安卓四套：local-api-test 133、boot-login-test 28、shim-test 31、apk-test 29，新增 `android/test/federation-test.mjs` 45（同机双实例 17881/17882、账号 700001/700002，覆盖真实地址、401、目录、邀请码往返、自动申请、双向投递、Bot 广场、502 文案）→ 合计 **266**。
+- 总计 **RAN 692 PASS 692 FAIL 0 ERR 0**。
+
+## 产物
+
+- 桌面：`dist/web`（index-5My2pUrU.js 453.63 kB、index-GjUk3vJK.css 147.38 kB）已部署到 `C:\Users\36328\Furry Everpony\resources\app`，`/api/health` = `{"ok":true,"version":"2026.11.15.0.10.12"}`。
+- 安卓：`android/dist/FurryEverpony-2026.11.15.0.10.12.apk`，853.6 KB，sha256 `8f39e552306c309c1e0d0bcccfd1845605946fa87345c837920b0a0432de8738`，versionCode 101012。
+- 桌面单文件：`release/FurryEverpony-2026.11.15.0.10.12.exe`，160,408,428 字节，sha256 `0b7055ca483c1c405889163565a0770a6a69bb68b51e37e3081df2433e767601`（桌面与 Downloads 各一份 `FurryEverpony.exe`，同哈希）。
+- 打包踩坑：这台机器上「node 脚本 → csc.exe」这条链写不出 exe（CS0016/CS1567 拒绝访问），但「run_code 直连 csc」可以。已把 `tools/sfx/build-launcher.mjs` 的编译改成 spawnSync + 补 TEMP/SystemRoot，并在编译被拒时检查现成 `launcher.exe` 里的版本号是否匹配，匹配就复用、不中断打包。
+
 # v2026.11.15.0.10.11 — 2026-11-15
 
 ## 跨网络加好友（不需要同一个 Wi-Fi，也不需要任何服务器）
