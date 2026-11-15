@@ -1,3 +1,27 @@
+# v2026.11.15.0.10.15 — 2026-11-16
+
+## 扫码加好友（电脑显示码，手机扫一下）
+
+- 加好友弹窗「我的邀请码」下面新增 **我的二维码**：把邀请码直接画成二维码（纯 SVG 渲染，不依赖 canvas/图片，缩放不糊），对方扫一下就能加。
+- 输入区右上角新增 **扫一扫** 按钮：打开取景框实时识别二维码，识别到自动填进输入框并立刻走加好友流程（邀请码 → 一步成为好友；自动通过开着的话扫完直接是好友）。
+- 摄像头打不开 / 没权限 / 没有摄像头时，弹层里保留 **从图片识别**：从相册或截图选一张二维码图片，用同一套解码器识别（电脑端没有摄像头也能用）。
+- 安卓端：AndroidManifest 增加 CAMERA 权限（required=false，没摄像头的设备照常安装），MainActivity 的 WebChromeClient 增加 onPermissionRequest 放行视频采集，并在没有权限时弹系统授权；拒绝后提示改用「从图片识别」。
+- 新增 web/src/ui/qr.jsx（QrCode + QrScanner，依赖 qrcode-generator 与 jsqr），pages.css 增加 .qr-box / .af-qr / .af-scan-btn / .qr-scan 系列样式（手机端全屏取景、扫描线动画）。
+
+## 修掉「好友申请点拒绝，报没有这条申请，列表还挂着」
+
+- 现象：别人申请加我的 Bot，在「新朋友」里点拒绝（或同意）一直报「没有这条申请」，但列表里那条申请还在，删不掉。
+- 根因：server/index.js 的 resolveFriendRequest 在按 requestId 找申请时只认 `row.to_id === me.id`；而「别人加我的 Bot」这条申请的接收方是 Bot，我作为 owner 本来有权审批，于是被判成 404。列表接口 /api/friends/requests 的 botIncoming 又是按 status='pending' 查的，所以拒绝失败后仍然显示。
+- 修法：requestId 分支改成 JOIN accounts 取 to_type / to_owner，判定 `row.to_id === me.id || (row.to_type === 'bot' && row.to_owner === me.id)` 才算我的申请；不满足才 404。拒绝成功后 status 置 rejected，列表即时消失。
+
+### 产物
+
+- 桌面 exe：release/FurryEverpony-2026.11.15.0.10.15.exe，159,778,101 字节，sha256 742b6443f1281827f73f685b98175d707abe80c9fc95408b87c9604ccc4c606d；启动器 139,264 字节（含 0.10.15），载荷 version=2026.11.15.0.10.15，web assets index-BxYmpsql.js / index-01Ug83hq.css，dist-apk 里只有 0.10.15 一个包。
+- 安卓 APK：android/dist/FurryEverpony-2026.11.15.0.10.15.apk，935,556 字节，sha256 b1efc1ddd1ba08c3b6219bc2acc98491e2c40fd91455c97b2e3a561c40d9f7d4，versionCode 101015，签名 CN=Furry Everpony。
+- 已部署到 C:\Users\36328\Furry Everpony\resources\app（server + dist/web + dist-apk + package.json），/api/health = {"ok":true,"version":"2026.11.15.0.10.15"}，/apk 返回 200、935,556 字节。
+- 已分发到桌面与 Downloads 的 FurryEverpony.exe / FurryEverpony.apk，哈希与上面一致（旧同名文件先删后放，不留旧版本）。
+- 测试：后端 11 套 RAN 443 PASS 443 FAIL 0 ERR 0（api 33、backup 35、features 25、federation 75、groups 36、im 78、link 18、model 37、offline 28、onebot-plus 62、onebot 16）；安卓 5 套 RAN 266 PASS 266 FAIL 0 ERR 0（local-api 133、boot-login 28、shim 31、apk 29、federation 45）。合计 RAN 709 PASS 709 FAIL 0 ERR 0。
+
 # v2026.11.15.0.10.14 — 2026-11-16
 
 ## 修掉「附近的实例」里混进自己

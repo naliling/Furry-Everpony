@@ -3056,3 +3056,103 @@ body,
   .fed-nearby-person { padding: 8px 2px; }
   .fed-nearby-person > .btn { min-width: 62px; height: 34px; }
 }
+
+
+/* ---------------- 二维码 / 扫一扫 ---------------- */
+
+.qr-box {
+  position: relative;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+  padding: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.qr-box svg { display: block; border-radius: 9px; }
+.qr-empty { background: repeating-conic-gradient(rgba(255, 255, 255, 0.12) 0% 25%, transparent 0% 50%) 50% / 14px 14px; }
+
+.af-qr {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 4px 0 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(88, 130, 255, 0.14), rgba(140, 90, 255, 0.06));
+  border: 1px solid rgba(120, 150, 255, 0.22);
+}
+.af-qr-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.af-qr-main b { font-size: 0.92rem; }
+.af-qr-main span { font-size: 0.76rem; line-height: 1.55; color: var(--text-2, #a9b2c6); }
+
+.af-scan-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 10px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 150, 255, 0.42);
+  background: rgba(88, 130, 255, 0.14);
+  color: #cfd9ff;
+  font-size: 0.74rem;
+  cursor: pointer;
+  transition: background 0.16s, border-color 0.16s, transform 0.16s;
+}
+.af-scan-btn:hover { background: rgba(88, 130, 255, 0.26); border-color: rgba(150, 175, 255, 0.7); transform: translateY(-1px); }
+
+.qr-scan {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: inherit;
+  background: radial-gradient(120% 80% at 50% 0%, rgba(20, 28, 48, 0.96), rgba(8, 11, 18, 0.98));
+  backdrop-filter: blur(6px);
+}
+.qr-scan-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 0.92rem; }
+.qr-scan-close {
+  width: 32px; height: 32px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06); color: #e8edf7; font-size: 1.15rem; line-height: 1; cursor: pointer;
+}
+.qr-scan-close:hover { background: rgba(255, 255, 255, 0.14); }
+.qr-scan-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 200px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #05070c;
+  display: flex; align-items: center; justify-content: center;
+}
+.qr-scan-video { width: 100%; height: 100%; object-fit: cover; }
+.qr-scan-frame {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(62%, 240px); aspect-ratio: 1 / 1;
+  border-radius: 18px;
+  box-shadow: 0 0 0 2px rgba(120, 170, 255, 0.85), 0 0 0 9999px rgba(4, 6, 12, 0.45);
+}
+.qr-scan-line {
+  position: absolute; left: 6px; right: 6px; top: 6px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #7fd3ff, transparent);
+  animation: qr-scan-move 2.1s ease-in-out infinite;
+}
+@keyframes qr-scan-move {
+  0%, 100% { top: 6px; opacity: 0.35; }
+  50% { top: calc(100% - 8px); opacity: 1; }
+}
+.qr-scan-hint { margin: 0; font-size: 0.8rem; line-height: 1.55; color: #a9b2c6; text-align: center; }
+.qr-scan-hint.is-err { color: #ffb4a8; }
+.qr-scan-foot { display: flex; gap: 10px; }
+.qr-scan-foot .btn { flex: 1 1 0; width: auto; height: 42px; }
+
+@media (max-width: 560px) {
+  .af-qr { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .af-qr .qr-box { align-self: center; }
+  .qr-scan { position: fixed; inset: 0; border-radius: 0; }
+  .qr-scan-frame { width: min(74%, 260px); }
+}

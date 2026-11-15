@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
 import { Modal, Avatar, Empty, Spinner, toast } from '../../ui/primitives.jsx';
 import { api } from '../../lib/api.js';
+import { QrCode, QrScanner } from '../../ui/qr.jsx';
 import { fmtClock, fmtDate, relTime } from '../../lib/format.js';
 
 /* ---------------- 加好友（一个输入框：邀请码 / 地址+号码 / 号码） ---------------- */
@@ -66,6 +67,7 @@ export function AddFriendModal({ token, onClose, onChanged }) {
   const [nearby, setNearby] = useState([]);
   const [invite, setInvite] = useState(null);
   const [inviteErr, setInviteErr] = useState('');
+  const [scanning, setScanning] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -139,7 +141,8 @@ export function AddFriendModal({ token, onClose, onChanged }) {
     toast('长按输入框粘贴，或者手动输入', 'info');
   };
 
-  const submit = async () => {
+  const submit = async (rawInput) => {
+    const target = parseTarget(typeof rawInput === 'string' ? rawInput : input);
     if (!target || busy) return;
     setBusy(true);
     setErr('');
@@ -222,6 +225,15 @@ export function AddFriendModal({ token, onClose, onChanged }) {
           {invite?.code ? <button type="button" className="btn btn-primary btn-sm" onClick={() => copy(invite.code, '邀请码')}><Icon name="copy" size={14} /> 复制</button> : null}
         </div>
         {invite?.code ? <textarea className="af-invite-code" readOnly rows={2} value={invite.code} onFocus={(e) => e.target.select()} /> : null}
+        {invite?.code ? (
+          <div className="af-qr">
+            <QrCode text={invite.code} size={156} />
+            <div className="af-qr-main">
+              <b>我的二维码</b>
+              <span>让对方打开「加好友 → 扫一扫」扫这张码，一步就能加我；自动通过开着的话扫完直接是好友。</span>
+            </div>
+          </div>
+        ) : null}
         <div className={'af-auto ' + (info?.autoAccept ? 'on' : '')}>
           <Icon name={info?.autoAccept ? 'check' : 'info'} size={14} />
           <span>{info?.autoAccept ? '已开启自动通过：拿我的邀请码/二维码加我的人直接成为好友，不用我点同意' : '自动通过已关闭：别人加我要我在「新朋友」里点同意'}</span>
@@ -229,7 +241,12 @@ export function AddFriendModal({ token, onClose, onChanged }) {
       </div>
 
       <label className="field">
-        <span className="field-label">对方的邀请码 / 地址 + 号码 / 号码</span>
+        <span className="field-label">
+          对方的邀请码 / 地址 + 号码 / 号码
+          <button type="button" className="af-scan-btn" onClick={() => setScanning(true)}>
+            <Icon name="qr" size={14} /> 扫一扫
+          </button>
+        </span>
         <textarea
           className="textarea af-input"
           rows={2}
@@ -310,10 +327,25 @@ export function AddFriendModal({ token, onClose, onChanged }) {
       <div className="modal-foot">
         <button type="button" className="btn btn-ghost" onClick={onClose}>{done ? '关闭' : '取消'}</button>
         <button type="button" className="btn btn-ghost" onClick={paste}><Icon name="copy" size={15} /> 粘贴</button>
-        <button type="button" className="btn btn-primary" disabled={!target || busy || !!done} onClick={submit}>
+        <button type="button" className="btn btn-primary" disabled={!target || busy || !!done} onClick={() => submit()}>
           {busy ? <Spinner size={15} /> : <Icon name="send" size={16} />} {target?.kind === 'invite' ? '用邀请码加好友' : '发送好友申请'}
         </button>
       </div>
+
+      {scanning ? (
+        <QrScanner
+          title="扫一扫加好友"
+          onClose={() => setScanning(false)}
+          onResult={(text) => {
+            setScanning(false);
+            setInput(text);
+            setErr('');
+            setFound(null);
+            setDone(null);
+            submit(text);
+          }}
+        />
+      ) : null}
     </Modal>
   );
 }

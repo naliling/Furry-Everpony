@@ -59,7 +59,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.15.0.10.14';
+const VERSION = '2026.11.15.0.10.15';
 
 const NUMBER_RE = /^[1-9]\d{4,11}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 5–12 位数字，且不能以 0 开头');
@@ -1245,10 +1245,17 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const body = req.body || {};
 
     if (body.requestId) {
+      /* 按 id 找申请：接收方可能是我，也可能是我的 Bot（别人加我的 Bot 由我代审批）。
+         以前只认 to_id === me.id，导致 Bot 申请点「拒绝/同意」一律报「没有这条申请」，但列表里还在显示。 */
       const row = db
-        .prepare('SELECT id, from_id, to_id, status FROM friend_requests WHERE id = ?')
+        .prepare(
+          `SELECT r.id, r.from_id, r.to_id, r.status, b.type AS to_type, b.owner_id AS to_owner
+             FROM friend_requests r JOIN accounts b ON b.id = r.to_id
+            WHERE r.id = ?`,
+        )
         .get(Number(body.requestId));
-      if (!row || row.to_id !== me.id) {
+      const mine = row && (row.to_id === me.id || (row.to_type === 'bot' && row.to_owner === me.id));
+      if (!mine) {
         reply.code(404).send({ error: '没有这条申请' });
         return null;
       }

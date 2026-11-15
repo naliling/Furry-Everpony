@@ -1218,15 +1218,26 @@ public final class Api {
     } else {
       String number = String.valueOf(b.get("number") == null ? "" : b.get("number"));
       Map<String, Object> from = accountByNumber(number);
+      /* 也可以指定 bot：别人想加我的 Bot，由我这个主人代审批 */
+      Map<String, Object> toAcc = me;
+      if (b.get("bot") != null) {
+        Map<String, Object> bot = accountByNumber(String.valueOf(b.get("bot")));
+        if (bot != null && "bot".equals(str(bot, "type")) && num(bot, "owner_id") == num(me, "id")) toAcc = bot;
+      }
       if (from != null) {
         for (Map<String, Object> r : store.rows("friend_requests")) {
-          if (num(r, "from_id") == num(from, "id") && num(r, "to_id") == num(me, "id")
+          if (num(r, "from_id") == num(from, "id") && num(r, "to_id") == num(toAcc, "id")
               && "pending".equals(str(r, "status"))) row = r;
         }
       }
     }
     if (row == null) { res.error(404, "没有这条申请"); return; }
-    if (num(row, "to_id") != num(me, "id")) { res.error(403, "这不是发给你的申请"); return; }
+    /* 接收方可能是我，也可能是我的 Bot（别人加我的 Bot 由我代审批）——
+       以前只认 to_id == 我，导致这类申请点同意/拒绝一律报「这不是发给你的申请」，列表里却一直挂着。 */
+    Map<String, Object> target = account(num(row, "to_id"));
+    boolean mine = num(row, "to_id") == num(me, "id")
+        || (target != null && "bot".equals(str(target, "type")) && num(target, "owner_id") == num(me, "id"));
+    if (!mine) { res.error(403, "这不是发给你的申请"); return; }
     if (!"pending".equals(str(row, "status"))) { res.error(409, "这条申请已经处理过了"); return; }
     if (accept) {
       Map<String, Object> from = account(num(row, "from_id"));

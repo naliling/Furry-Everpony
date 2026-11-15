@@ -125,6 +125,29 @@ try {
 
   const outsider = await call('GET', `/api/conversations/${convId}/messages`, { token: c.data.token });
   check('非会话成员读消息 403', outsider.status === 403);
+
+  console.log('别人加我的 Bot，我代审批（拒绝/同意都不能报没有这条申请）');
+  const bot = await call('POST', '/api/bots', { token: A, body: { number: '100900', nickname: '甲的机器人' } });
+  check('甲建了一个 Bot', bot.status === 200, JSON.stringify(bot.data));
+  const botReq = await call('POST', '/api/friends/request', { token: B, body: { number: '100900', message: '想加你的机器人' } });
+  check('乙申请加甲的 Bot', botReq.status === 200 && botReq.data.status === 'pending', JSON.stringify(botReq.data));
+  const botInbox = await call('GET', '/api/friends/requests', { token: A });
+  check('甲看到 Bot 好友申请', (botInbox.data.botIncoming || []).length === 1, JSON.stringify(botInbox.data.botIncoming));
+  const botRequestId = botInbox.data.botIncoming[0]?.id;
+  const botReject = await call('POST', '/api/friends/reject', { token: A, body: { requestId: botRequestId } });
+  check('甲按 requestId 拒绝 Bot 申请成功（不再 404）', botReject.status === 200 && botReject.data.status === 'rejected', JSON.stringify(botReject.data));
+  const botInbox2 = await call('GET', '/api/friends/requests', { token: A });
+  check('拒绝后 Bot 申请从列表消失', (botInbox2.data.botIncoming || []).length === 0);
+
+  const botReq2 = await call('POST', '/api/friends/request', { token: B, body: { number: '100900' } });
+  check('乙再申请一次加 Bot', botReq2.status === 200);
+  const botInbox3 = await call('GET', '/api/friends/requests', { token: A });
+  const botRequestId2 = botInbox3.data.botIncoming[0]?.id;
+  const botAccept = await call('POST', '/api/friends/accept', { token: A, body: { requestId: botRequestId2 } });
+  check('甲按 requestId 同意 Bot 申请成功', botAccept.status === 200 && botAccept.data.status === 'accepted', JSON.stringify(botAccept.data));
+
+  const outsiderBot = await call('POST', '/api/friends/reject', { token: c.data.token, body: { requestId: botRequestId2 } });
+  check('不相干的人处理别人的 Bot 申请 404', outsiderBot.status === 404);
 } catch (err) {
   failures.push('异常: ' + err.message);
   console.error(err);

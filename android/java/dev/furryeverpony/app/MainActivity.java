@@ -22,6 +22,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -64,6 +65,7 @@ public class MainActivity extends Activity {
 
     private static final int REQ_FILE = 1001;
     private static final int REQ_NOTIF = 1002;
+    private static final int REQ_CAMERA = 1003;
     private static final int PORT_FIRST = 7788;
     private static final int PORT_TRIES = 12;
     /** 首选端口绑不上时（常见于上一个进程还没放掉端口），同一端口再试几次，别急着漂到下一个。 */
@@ -97,6 +99,8 @@ public class MainActivity extends Activity {
     private LinearLayout errorBox;
     private TextView errorText;
     private ValueCallback<Uri[]> pendingFiles;
+    /** 网页请求摄像头时先挂起，等系统权限弹窗有结果再放行 */
+    private PermissionRequest pendingCamera;
     private long lastBackAt;
     private int backSeq;
     private boolean webShown;
@@ -481,6 +485,46 @@ public class MainActivity extends Activity {
 
         web.setWebChromeClient(new WebChromeClient() {
             @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                // 扫一扫要摄像头：网页 getUserMedia 在 WebView 里必须由这里显式放行
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        String[] want = new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE};
+                        if (request.getResources() == null) {
+                            request.deny();
+                            return;
+                        }
+                        boolean video = false;
+                        for (String r : request.getResources()) {
+                            if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) video = true;
+                        }
+                        if (!video) {
+                            request.deny();
+                            return;
+                        }
+                        if (checkSelfPermission(android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                            request.grant(want);
+                            return;
+                        }
+                        if (pendingCamera != null) {
+                            try {
+                                pendingCamera.deny();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                        pendingCamera = request;
+                        try {
+                            requestPermissions(new String[]{android.Manifest.permission.CAMERA}, REQ_CAMERA);
+                        } catch (Throwable t) {
+                            pendingCamera = null;
+                            request.deny();
+                        }
+                    }
+                });
+            }
+
+            @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> cb, FileChooserParams params) {
                 if (pendingFiles != null) pendingFiles.onReceiveValue(null);
                 pendingFiles = cb;
@@ -583,6 +627,25 @@ public class MainActivity extends Activity {
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == REQ_CAMERA) {
+            PermissionRequest req = pendingCamera;
+            pendingCamera = null;
+            boolean ok = grantResults != null && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            if (req != null) {
+                try {
+                    if (ok) req.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+                    else req.deny();
+                } catch (Throwable ignored) {
+                }
+            }
+            if (!ok) Toast.makeText(this, "没有相机权限，扫一扫可以用「从图片识别」", Toast.LENGTH_LONG).show();
+            return;
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
 
     @Override
