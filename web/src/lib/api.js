@@ -47,10 +47,11 @@ function netOk() {
   }, 2000);
 }
 
-/* ---------- 服务器地址（中心服务器模式） ----------
-   留空 = 连本机（桌面端/手机本地服务端）；
-   填 http://1.2.3.4:7788 或 https://chat.example.com = 连那台公共服务器，
-   账号、号码、好友、消息就都归那台服务器管，和普通聊天软件一样。 */
+/* ---------- 服务器地址 ----------
+   纯网页版：所有人打开同一个网址，前端永远只跟「当前网址」这台服务器说话。
+   2026-11-17 用户要求删掉登录页的服务器输入框（「为啥会有服务器自选」），
+   这里保留函数名只为兼容老引用，实际一律返回空字符串 = 同源请求；
+   旧版本存在 localStorage 的 fe_server 顺手清掉，避免连到早已关掉的地址。 */
 export const SERVER_KEY = 'fe_server';
 
 export function normalizeServerUrl(raw) {
@@ -64,21 +65,20 @@ export function normalizeServerUrl(raw) {
 
 export function serverBase() {
   try {
-    return normalizeServerUrl(localStorage.getItem(SERVER_KEY) || '');
-  } catch {
-    return '';
-  }
-}
-
-export function setServerBase(raw) {
-  const s = normalizeServerUrl(raw);
-  try {
-    if (s) localStorage.setItem(SERVER_KEY, s);
-    else localStorage.removeItem(SERVER_KEY);
+    localStorage.removeItem(SERVER_KEY);
   } catch {
     /* 隐私模式忽略 */
   }
-  return s;
+  return '';
+}
+
+export function setServerBase() {
+  try {
+    localStorage.removeItem(SERVER_KEY);
+  } catch {
+    /* 隐私模式忽略 */
+  }
+  return '';
 }
 
 /** 拼上当前服务器前缀：服务端路径一律走这里 */

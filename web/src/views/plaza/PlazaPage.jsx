@@ -41,6 +41,7 @@ export default function PlazaPage({ onLogin }) {
     timerRef.current = window.setTimeout(() => load(value.trim()), 300);
   };
 
+  const siteHost = (typeof window !== 'undefined' && window.location.host) || '本站';
   const list = bots || [];
 
   return (
@@ -51,7 +52,7 @@ export default function PlazaPage({ onLogin }) {
           <span className="plaza-brand-mark"><Icon name="starFilled" size={19} /></span>
           <div>
             <strong>Everony</strong>
-            <span>{serverBase() || '本站'} · Bot 广场</span>
+            <span>{siteHost} · Bot 广场</span>
           </div>
         </div>
         <div className="plaza-top-actions">

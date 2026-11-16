@@ -62,7 +62,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.16.0.10.22';
+const VERSION = '2026.11.17.0.10.23';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -919,17 +919,107 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     return { number: parsed.data, available: !taken };
   });
 
-  /* ---------- 注册 ---------- */
+  /* ---------- 图形验证码（注册防机器人，纯本地生成，不依赖第三方） ---------- */
+const CAPTCHA_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+const CAPTCHA_TTL_MS = 5 * 60 * 1000;
+const CAPTCHA_MAX_TRIES = 5;
+const captchaStore = new Map();
+const captchaHits = new Map();
+const registerHits = new Map();
+
+const sweepMap = (map, ttl) => {
+  const now = Date.now();
+  for (const [k, v] of map) {
+    const at2 = Array.isArray(v) ? v[v.length - 1] : v.expires;
+    if (!at2 || now - at2 > ttl) map.delete(k);
+  }
+};
+const hitAllowed = (map, key, max, windowMs) => {
+  const now = Date.now();
+  const list = (map.get(key) || []).filter((t) => now - t < windowMs);
+  if (list.length >= max) {
+    map.set(key, list);
+    return false;
+  }
+  list.push(now);
+  map.set(key, list);
+  return true;
+};
+const randomCode = (len = 4) => {
+  const bytes = randomBytes(len);
+  let out = '';
+  for (let i = 0; i < len; i += 1) out += CAPTCHA_CHARS[bytes[i] % CAPTCHA_CHARS.length];
+  return out;
+};
+const captchaSvg = (code) => {
+  const w = 132;
+  const h = 44;
+  const pick = (arr) => arr[randomBytes(1)[0] % arr.length];
+  const colors = ['#7fe6ff', '#b79bff', '#8ef0c0', '#ffd479', '#ff9ecb'];
+  let chars = '';
+  for (let i = 0; i < code.length; i += 1) {
+    const x = 16 + i * 28 + (randomBytes(1)[0] % 5);
+    const y = 30 + (randomBytes(1)[0] % 7) - 3;
+    const rot = (randomBytes(1)[0] % 26) - 13;
+    chars += `<text x="${x}" y="${y}" fill="${pick(colors)}" font-size="25" font-family="Segoe UI, Arial, sans-serif" font-weight="700" transform="rotate(${rot} ${x} ${y})">${code[i]}</text>`;
+  }
+  let noise = '';
+  for (let i = 0; i < 3; i += 1) {
+    const y1 = randomBytes(1)[0] % h;
+    const y2 = randomBytes(1)[0] % h;
+    noise += `<path d="M0 ${y1} Q ${w / 2} ${randomBytes(1)[0] % h} ${w} ${y2}" stroke="${pick(colors)}" stroke-opacity="0.35" stroke-width="1.2" fill="none"/>`;
+  }
+  for (let i = 0; i < 26; i += 1) {
+    noise += `<circle cx="${randomBytes(1)[0] % w}" cy="${randomBytes(1)[0] % h}" r="1" fill="${pick(colors)}" fill-opacity="0.4"/>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" rx="8" fill="#0f1420"/>${noise}${chars}</svg>`;
+};
+
+app.get('/api/captcha', async (req, reply) => {
+  sweepMap(captchaStore, CAPTCHA_TTL_MS);
+  if (!hitAllowed(captchaHits, req.ip || 'local', 40, 10 * 60 * 1000)) {
+    return reply.code(429).send({ error: '刷新太频繁了，过一会儿再试' });
+  }
+  const id = randomBytes(12).toString('hex');
+  const code = randomCode();
+  captchaStore.set(id, { code, expires: Date.now() + CAPTCHA_TTL_MS, tries: 0 });
+  return { id, svg: captchaSvg(code), expiresIn: Math.round(CAPTCHA_TTL_MS / 1000) };
+});
+
+/* ---------- 注册 ---------- */
   app.post('/api/register', async (req, reply) => {
     const schema = z.object({
       email: emailSchema,
       number: numberSchema,
       password: z.string().min(8, '密码至少 8 位').max(128),
       nickname: z.string().trim().min(1, '昵称不能为空').max(24, '昵称最多 24 个字'),
+      captchaId: z.string({ error: '验证码过期了，点图片换一张' }).trim().min(1, '验证码过期了，点图片换一张'),
+      captcha: z.string({ error: '请输入图片里的验证码' }).trim().min(1, '请输入图片里的验证码'),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
-    const { email, number, password, nickname } = parsed.data;
+    const { email, number, password, nickname, captchaId, captcha } = parsed.data;
+
+    /* 同一 IP 10 分钟最多 5 次注册，挡住脚本批量刷号 */
+    if (!hitAllowed(registerHits, req.ip || 'local', 20, 10 * 60 * 1000)) {
+      return reply.code(429).send({ error: '注册太频繁了，10 分钟后再试' });
+    }
+
+    /* 校验图形验证码：一次性，错 5 次作废 */
+    const captchaEntry = captchaStore.get(captchaId);
+    if (!captchaEntry || captchaEntry.expires < Date.now()) {
+      captchaStore.delete(captchaId);
+      return reply.code(400).send({ error: '验证码过期了，点图片换一张' });
+    }
+    captchaEntry.tries += 1;
+    if (captchaEntry.tries > CAPTCHA_MAX_TRIES) {
+      captchaStore.delete(captchaId);
+      return reply.code(400).send({ error: '验证码试太多次了，换一张新的' });
+    }
+    if (captchaEntry.code !== captcha.toUpperCase()) {
+      return reply.code(400).send({ error: '验证码不对，再试一次' });
+    }
+    captchaStore.delete(captchaId);
 
     if (db.prepare('SELECT 1 FROM accounts WHERE email = ?').get(email)) {
       return reply.code(409).send({ error: '这个邮箱已经注册过了' });

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Icon from '../ui/icons.jsx';
 import { Segmented, Spinner, Avatar, toast } from '../ui/primitives.jsx';
-import { api, apiUrl, loadAccounts, rememberAccount, forgetAccount, serverBase, setServerBase } from '../lib/api.js';
+import { api, loadAccounts, rememberAccount, forgetAccount } from '../lib/api.js';
 
 const THEMES = [
   { value: 'deep', label: '深空' },
@@ -36,46 +36,29 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [accountList, setAccountList] = useState(() => loadAccounts());
-  /* 中心服务器模式：留空连本机，填地址连那台公共服务器 */
-  const [serverInput, setServerInput] = useState(() => serverBase());
-  const [serverBusy, setServerBusy] = useState(false);
-  const [serverInfo, setServerInfo] = useState(null);
-  const [lanServers, setLanServers] = useState([]);
+  /* 注册验证码：后端生成 SVG，前端只负责显示、刷新与提交 */
+  const [captcha, setCaptcha] = useState(null);
+  const [captchaCode, setCaptchaCode] = useState('');
+  const [captchaBusy, setCaptchaBusy] = useState(false);
   const emailRef = useRef(null);
 
-  const probeServer = async (base) => {
-    setServerBusy(true);
+  const loadCaptcha = async () => {
+    setCaptchaBusy(true);
     try {
-      const res = await fetch((base || '') + '/api/health');
-      const data = await res.json();
-      if (!res.ok) throw new Error('bad');
-      setServerInfo({ ok: true, version: data.version || '', role: data.role || '' });
+      const data = await api('/api/captcha');
+      setCaptcha({ id: data.id, svg: data.svg });
+      setCaptchaCode('');
     } catch {
-      setServerInfo({ ok: false, version: '' });
+      setCaptcha(null);
     } finally {
-      setServerBusy(false);
+      setCaptchaBusy(false);
     }
   };
 
   useEffect(() => {
-    probeServer(serverBase());
-    /* 没配服务器时自动找一下局域网里的服务器（手机不用手打 IP） */
-    if (!serverBase()) {
-      fetch(apiUrl('/api/discover/lan'))
-        .then((r) => (r.ok ? r.json() : { instances: [] }))
-        .then((d) => setLanServers(Array.isArray(d.instances) ? d.instances.filter((x) => x && x.addr) : []))
-        .catch(() => setLanServers([]));
-    }
+    loadCaptcha();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const applyServer = async () => {
-    const saved = setServerBase(serverInput);
-    setServerInput(saved);
-    setError('');
-    setCheck(null);
-    await probeServer(saved);
-  };
 
   useEffect(() => {
     setError('');
@@ -106,7 +89,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
       clearTimeout(timer);
       setChecking(false);
     };
-  }, [number, mode, serverInfo]);
+  }, [number, mode]);
 
   const onNumber = (v) => setNumber(v.replace(/\D/g, '').replace(/^0+/, '').slice(0, 11));
 
@@ -162,16 +145,21 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
       setError('这个号码已经被用了');
       return;
     }
+    if (!captcha || !captchaCode.trim()) {
+      setError('请输入图片里的验证码');
+      return;
+    }
     setBusy(true);
     try {
       const data = await api('/api/register', {
         method: 'POST',
-        body: { email: mail, number: n, nickname: nickname.trim(), password },
+        body: { email: mail, number: n, nickname: nickname.trim(), password, captchaId: captcha.id, captcha: captchaCode.trim() },
       });
       rememberAccount(data.account, data.token);
       onAuthed(data);
     } catch (err) {
       setError(err.message);
+      if (/验证码/.test(err.message || '')) loadCaptcha();
     } finally {
       setBusy(false);
     }
@@ -264,65 +252,6 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
             </p>
           </header>
 
-          <div className="auth-server">
-            <span className="auth-server-label">
-              <Icon name="wifi" size={14} />
-              服务器
-            </span>
-            <input
-              className="auth-server-input"
-              spellCheck={false}
-              autoComplete="off"
-              placeholder="留空 = 本机；自建服务器填 http://IP:7788"
-              value={serverInput}
-              onChange={(e) => setServerInput(e.target.value)}
-              onBlur={applyServer}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  applyServer();
-                }
-              }}
-            />
-            <button type="button" className="btn btn-ghost btn-sm auth-server-go" onClick={applyServer} disabled={serverBusy}>
-              {serverBusy ? <Spinner size={13} /> : '连接'}
-            </button>
-          </div>
-          <p className={'auth-server-note' + (serverInfo && !serverInfo.ok ? ' is-bad' : '')}>
-            {serverInfo
-              ? serverInfo.ok
-                ? '已连上 ' + (serverBase() || '本机') + (serverInfo.version ? ' · 版本 ' + serverInfo.version : '')
-                : '连不上 ' + (serverBase() || '本机') + '，检查地址或网络'
-              : '正在检查服务器…'}
-          </p>
-
-          {!serverBase() && lanServers.length ? (
-            <div className="auth-lan">
-              <span className="auth-lan-label">
-                <Icon name="wifi" size={13} />
-                局域网里发现 {lanServers.length} 台服务器，点一下就用手边的
-              </span>
-              <div className="auth-lan-list">
-                {lanServers.slice(0, 3).map((item) => (
-                  <button
-                    key={item.addr}
-                    type="button"
-                    className="auth-lan-item"
-                    onClick={async () => {
-                      setServerInput(item.addr);
-                      const saved = setServerBase(item.addr);
-                      setServerInput(saved);
-                      await probeServer(saved);
-                    }}
-                  >
-                    <b>{item.addr}</b>
-                    <span>{item.version || ''}{item.people ? ' · ' + item.people + ' 人' : ''}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
           <form className="auth-form" onSubmit={submit}>
             {mode === 'login' ? (
               <label className="field">
@@ -413,6 +342,35 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
                 <div className="input-wrap">
                   <Icon name="lock" size={17} className="input-icon" />
                   <input className="input" type="password" autoComplete="new-password" placeholder="再输一次" value={password2} onChange={(e) => setPassword2(e.target.value)} />
+                </div>
+              </label>
+            ) : null}
+
+            {mode === 'register' ? (
+              <label className="field">
+                <span className="field-label">
+                  验证码 <span className="field-hint">防止机器人批量注册</span>
+                </span>
+                <div className="captcha-row">
+                  <div className="input-wrap">
+                    <Icon name="shield" size={17} className="input-icon" />
+                    <input
+                      className="input"
+                      autoComplete="off"
+                      spellCheck={false}
+                      maxLength={6}
+                      placeholder="输入右边 4 个字符"
+                      value={captchaCode}
+                      onChange={(e) => setCaptchaCode(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, ''))}
+                    />
+                  </div>
+                  <button type="button" className="captcha-img" onClick={loadCaptcha} title="看不清？点一下换一张" disabled={captchaBusy}>
+                    {captcha ? (
+                      <img src={'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(captcha.svg)} alt="验证码" />
+                    ) : (
+                      <Spinner size={16} />
+                    )}
+                  </button>
                 </div>
               </label>
             ) : null}

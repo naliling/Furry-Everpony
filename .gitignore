@@ -8,6 +8,13 @@ node_modules/
 !.tools/restart-server.ps1
 !.tools/start-server.vbs
 !.tools/server.env
+!.tools/launch-tunnel.mjs
+!.tools/tunnel.mjs
+!.tools/watchdog.mjs
+!.tools/everony.ps1
+!.tools/test-p1.mjs
+!.tools/test-admin.mjs
+!.tools/test-captcha.mjs
 
 # 构建产物
 dist/

@@ -297,6 +297,17 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
     try { await navigator.clipboard.writeText(text); toast('已复制', 'success'); } catch { toast('复制失败', 'error'); }
   };
 
+  const isAdmin = Boolean(me?.is_admin);
+  const [adminStats, setAdminStats] = useState(null);
+  useEffect(() => {
+    if (!isAdmin) return undefined;
+    let alive = true;
+    api('/api/admin/overview', { token })
+      .then((d) => { if (alive) setAdminStats(d?.counts || null); })
+      .catch(() => { /* 不是管理员或服务端没开就静默 */ });
+    return () => { alive = false; };
+  }, [isAdmin, token]);
+
   const isBot = me?.type === 'bot';
   const platform = typeof window !== 'undefined' && window.fe?.platform ? window.fe.platform : '浏览器';
 
@@ -310,6 +321,25 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
       </header>
 
       <div className="settings-body">
+        {isAdmin ? (
+          <section className="settings-card admin-entry">
+            <header className="settings-card-head">
+              <h3><Icon name="shield" size={17} /> 管理台</h3>
+              <span className="admin-entry-tag">站长</span>
+            </header>
+            <p className="admin-entry-sub">这是你自己的站点，下面这些数字是真实数据，随时可查。</p>
+            <div className="admin-entry-stats">
+              <div><b>{adminStats ? adminStats.accounts : '—'}</b><span>账号</span></div>
+              <div><b>{adminStats ? adminStats.bots : '—'}</b><span>Bot</span></div>
+              <div><b>{adminStats ? adminStats.messages : '—'}</b><span>消息</span></div>
+              <div><b>{adminStats ? adminStats.onlineNow : '—'}</b><span>在线</span></div>
+            </div>
+            <div className="admin-entry-actions">
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => onGoTab?.('admin')}><Icon name="shield" size={15} /> 进入管理台</button>
+              <span className="admin-entry-hint">封禁账号、上架下架 Bot、删消息、看站点数据</span>
+            </div>
+          </section>
+        ) : null}
         <section className="settings-card">
           <header className="settings-card-head"><h3><Icon name="friend" size={17} /> 个人资料</h3>{saved ? <span className="settings-saved">{saved}</span> : null}</header>
           <div className="settings-profile">
