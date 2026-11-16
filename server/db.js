@@ -356,4 +356,16 @@ function migrate(db) {
 
     CREATE INDEX IF NOT EXISTS idx_fed_outbox_due ON federation_outbox(next_at);
   `);
+
+  /* ---------- v0.10.21：平台管理员与封禁 ---------- */
+  if (!hasColumn(db, 'accounts', 'is_admin')) {
+    db.exec("ALTER TABLE accounts ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!hasColumn(db, 'accounts', 'banned')) {
+    db.exec("ALTER TABLE accounts ADD COLUMN banned INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!hasColumn(db, 'accounts', 'ban_reason')) {
+    db.exec("ALTER TABLE accounts ADD COLUMN ban_reason TEXT NOT NULL DEFAULT ''");
+  }
 }
+

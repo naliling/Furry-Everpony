@@ -44,7 +44,7 @@ const FONTS = [
   { id: 'l', name: '大', sample: '16' },
 ];
 
-export default function Settings({ token, me, theme, onTheme, font, onFont, onOpenNotifications, onOpenFavorites, notifCount = 0, onSwitchAccount, onAddAccount, onLogout, onMeChange }) {
+export default function Settings({ token, me, theme, onTheme, font, onFont, onOpenNotifications, onOpenFavorites, notifCount = 0, onSwitchAccount, onAddAccount, onLogout, onMeChange, onGoTab }) {
   const [profile, setProfile] = useState({ nickname: me?.nickname || '', bio: me?.bio || '', status: me?.status || 'online' });
   const [savingProfile, setSavingProfile] = useState(false);
   const [pwd, setPwd] = useState({ oldPassword: '', newPassword: '', confirm: '' });
@@ -509,44 +509,70 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
           </section>
         ) : null}
 
-        {isDesktop ? (
-          <section className="settings-card">
-            <header className="settings-card-head"><h3><Icon name="phone" size={17} /> 手机与局域网</h3></header>
-            <div className="settings-row">
-              <div className="settings-row-main"><b><Icon name="wifi" size={16} /> 允许手机 / 平板连接</b><span>打开后同一个 Wi-Fi 下的手机用浏览器就能登录，改完要重启应用</span></div>
-              <Toggle checked={lanAccess} onChange={changeLanAccess} label="局域网访问" />
+        <section className="settings-card">
+          <header className="settings-card-head"><h3><Icon name="wifi" size={17} /> 访问入口</h3></header>
+          {server && (server.lan?.length || server.lanUrls?.length) ? (
+            <div className="access-block">
+              <div className="access-main">
+                <b><Icon name="wifi" size={16} /> 同一个 Wi-Fi 下</b>
+                <span>手机连同一个 Wi-Fi，用浏览器打开下面的地址就能进，不需要装任何东西</span>
+                <div className="access-urls">
+                  {(server.lan?.length ? server.lan : (server.lanUrls || []).map((url, i) => ({ url, name: server.lanNames?.[i] || '' }))).map((item) => (
+                    <button type="button" key={item.url} className="about-url" onClick={() => copy(item.url)} title="点击复制">
+                      <code>{item.url}</code>
+                      {item.name ? <em className="about-url-nic">{item.name}</em> : null}
+                      <Icon name="copy" size={14} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="access-qr">
+                <QrCode text={(server.lan?.[0]?.url) || server.lanUrls?.[0] || ''} size={124} />
+                <span>手机扫码直接打开</span>
+              </div>
             </div>
-            <div className="settings-row">
-              <div className="settings-row-main">
-                <b><Icon name="refresh" size={16} /> 重启应用</b>
-                <span>{server && server.boundToLan === (lanAccess ? true : false) ? '设置已生效' : '设置改过之后需要重启一次'}</span>
-              </div>
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => window.fe?.restartApp?.()}>重启应用</button>
+          ) : server === null ? (
+            <SkeletonList rows={2} />
+          ) : (
+            <p className="settings-hint">没读到局域网地址。电脑和手机要在同一个 Wi-Fi 下，或者直接用外网地址。</p>
+          )}
+
+          <div className="settings-row">
+            <div className="settings-row-main">
+              <b><Icon name="globe" size={16} /> 外网地址</b>
+              <span>{server && server.tunnel ? '不在同一个 Wi-Fi 也能用，别人在任何网络下都能打开' : '外网地址由服务端自动建立，就绪后会自动出现在这里，不需要你操作'}</span>
             </div>
-            {server && server.lanUrls?.length ? (
-              <div className="about-lan">
-                <span>手机打开这个地址（同一条 Wi-Fi）</span>
-                {server.lanUrls.map((url, i) => (
-                  <button type="button" key={url} className="about-url" onClick={() => copy(url)} title="点击复制">
-                    <code>{url}</code>
-                    <em className="about-url-nic">{server.lanNames?.[i] || ''}</em>
-                    <Icon name="copy" size={14} />
-                  </button>
-                ))}
-                <span className="settings-hint">手机和电脑要在同一个 Wi-Fi 下；如果还是打不开，点下面的「放行防火墙」。</span>
-              </div>
-            ) : null}
-            <div className="settings-row">
-              <div className="settings-row-main">
-                <b><Icon name="shield" size={16} /> 放行防火墙</b>
-                <span>{firewall.text || '让 Windows 放行 7788 端口，手机才连得上'}</span>
-              </div>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={checkFirewall} disabled={firewall.busy}>
-                {firewall.busy ? <Spinner size={15} /> : <Icon name="shield" size={15} />} {firewall.ok ? '已放行' : '放行防火墙'}
+            {server && server.tunnel ? (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => copy(server.tunnel)}><Icon name="copy" size={15} /> 复制</button>
+            ) : <span className="settings-hint">准备中</span>}
+          </div>
+          {server && server.tunnel ? (
+            <div className="access-urls">
+              <button type="button" className="about-url" onClick={() => copy(server.tunnel)} title="点击复制">
+                <code>{server.tunnel}</code>
+                <Icon name="copy" size={14} />
               </button>
             </div>
-          </section>
-        ) : null}
+          ) : null}
+
+          <div className="settings-row">
+            <div className="settings-row-main">
+              <b><Icon name="shield" size={16} /> 端口与防火墙</b>
+              <span>服务端监听 {server?.port || 7788} 端口；手机连不上时先在 Windows 防火墙放行这个端口</span>
+            </div>
+            <code className="settings-code">netsh advfirewall firewall add rule name="Everony 7788" dir=in action=allow protocol=TCP localport=7788</code>
+          </div>
+
+          {me?.is_admin ? (
+            <div className="settings-row">
+              <div className="settings-row-main">
+                <b><Icon name="shield" size={16} /> 管理后台</b>
+                <span>账号封禁、Bot 上架、消息管理、站点统计</span>
+              </div>
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => onGoTab?.('admin')}><Icon name="shield" size={15} /> 打开管理</button>
+            </div>
+          ) : null}
+        </section>
 
         <FederationCard token={token} />
 
@@ -571,7 +597,7 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
                 </div>
               ) : null}
               <div className="about-row"><span>我的号码</span><b>{me?.number || '—'}</b></div>
-              <p className="settings-hint">Furry Everpony 是自托管、去中心化的聊天软件：每个实例有自己的数据库和用户，实例之间可以互加好友。<br />数据都在你自己的电脑上，换台机器请备份 data 目录。</p>
+              <p className="settings-hint">Everony 是自托管、去中心化的聊天软件：每个实例有自己的数据库和用户，实例之间可以互加好友。<br />数据都在你自己的电脑上，换台机器请备份 data 目录。</p>
             </div>
           )}
         </section>

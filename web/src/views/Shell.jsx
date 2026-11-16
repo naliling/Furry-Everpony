@@ -7,6 +7,7 @@ import ChatTab from './chat/ChatTab.jsx';
 import ContactsTab from './contacts/ContactsTab.jsx';
 import DiscoverTab from './discover/DiscoverTab.jsx';
 import Settings from './Settings.jsx';
+import AdminPage from './admin/AdminPage.jsx';
 
 /* 广场是首页：打开就看见有哪些 Bot，再进消息 */
 const NAV = [
@@ -267,6 +268,12 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
     return totalUnread;
   };
 
+  /* 管理入口只给管理员看，普通用户不会知道它存在 */
+  const navItems = useMemo(
+    () => (meLive?.is_admin ? [...NAV, { id: 'admin', icon: 'shield', label: '管理' }] : NAV),
+    [meLive?.is_admin],
+  );
+
   const switchAccount = async (acc) => {
     try {
       const data = await api('/api/me', { token: acc.token });
@@ -286,12 +293,12 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
   return (
     <div className={'app-shell' + (isMobile ? ' is-mobile' : '')}>
       <aside className="rail" aria-label="主导航">
-        <div className="rail-logo" title="Furry Everpony">
+        <div className="rail-logo" title="Everony">
           <Icon name="chatBubble" size={22} />
           <span className="rail-logo-glow" aria-hidden />
         </div>
         <nav className="rail-nav">
-          {NAV.map((item) => (
+          {navItems.map((item) => (
             <button
               type="button"
               key={item.id}
@@ -384,13 +391,15 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
             onAddAccount={onAddAccount}
             onLogout={onLogout}
             onMeChange={setMeLive}
+            onGoTab={setTab}
           />
         ) : null}
+        {tab === 'admin' && meLive?.is_admin ? <AdminPage token={token} me={meLive} /> : null}
       </main>
 
       {isMobile ? (
         <nav className="mobile-tabbar" aria-label="底部导航">
-          {NAV.map((item) => (
+          {navItems.map((item) => (
             <button
               type="button"
               key={item.id}

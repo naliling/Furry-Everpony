@@ -1,4 +1,22 @@
+# v2026.11.16.0.10.21 — 2026-11-16
+
+## 手机直接能用：访问入口卡片 + 外网隧道 + 管理后台
+
+这一版解决的是「不给安装包，手机怎么进来、运营者怎么管」。
+
+- **设置页新增「访问入口」卡片**（`web/src/views/Settings.jsx`）：列出所有可用的局域网地址（每台电脑的网卡名一并显示）、一键复制、旁边直接放二维码，手机扫码就打开；不再依赖桌面外壳，纯网页下也会显示（旧版这块被 `isDesktop` 挡住，拆掉客户端后永远看不见）。
+- **外网地址自动出现**：新增 `.tools/tunnel.mjs` 常驻脚本，用 cloudflared quick tunnel 把 7788 端口映射出去，拿到地址后写入 `data/tunnel.json`，`/api/server-info` 把它带给前端；断线自动重连，地址变了页面自动更新。开机自启项 `Startup\EveronyServer.vbs` 现在同时拉起「后台服务端」和「隧道」两个进程。
+- **管理后台**（新增 `web/src/views/admin/AdminPage.jsx` + `/api/admin/*` 接口）：概览统计（账号/Bot/消息/群/今日新增/在线数/库大小/运行时长）、账号管理（搜索、筛选、封禁解封、设/取消管理员）、Bot 管理（上架下架、所属人、消息数）、消息管理（最近 100 条、管理员删除）。入口只对 `is_admin` 显示。
+- **账号新增三个字段**：`accounts.is_admin`、`banned`、`ban_reason`（`server/db.js` 自动迁移）。被封禁的账号登录直接 403，已登录的会话立即失效（封禁时清 sessions）。
+- **管理员引导**：启动时读 `FE_ADMIN_NUMBERS`（逗号分隔的号码）；一个管理员都没有时，把最早注册的个人号设为管理员，保证新库也能进后台。
+- **修掉 `/api/server-info` 重复注册**：新加的实现与旧实现撞路由（Fastify 会抛 `FST_ERR_DUPLICATED_ROUTE`），合并成一份，保留旧的 `lanUrls/lanNames/webReady` 并新增 `lan`（含网卡名）与 `tunnel`。
+
 # v2026.11.16.0.10.20 — 2026-11-16
+
+- **界面品牌统一为 Everony**：登录页顶部「NapChat聊天社交~」、启动页、浏览器标题、设置页「关于」全部改成 Everony（`web/src/views/Auth.jsx`、`web/src/App.jsx`、`web/src/views/Shell.jsx`、`web/src/views/Settings.jsx`）。
+- **桌面广场不再空一大片**：卡片墙改成 `auto-fit` + 上限 340px 并整排居中，Bot 少时也不会挤在左边；底部新增「挑一个就开聊 / 号码记住你 / 自己的 Bot 也能挂」三格说明（手机端单列）。
+- **管理页样式补齐**：`web/src/pages.css` 增加整套 `.admin-*`（统计卡自适应、胶囊 tab、账号行按钮对齐、720px 手机断点），并修掉 `web/src/styles.css` 里错用的 `var(--line-1)`。
+- **空库也能进管理台**：注册时如果库里还没有管理员，注册者自动成为管理员。
 
 ## 彻底拆掉客户端：只剩一个后台服务 + 浏览器
 

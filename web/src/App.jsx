@@ -58,7 +58,7 @@ function BootSplash() {
   return (
     <div className="boot-splash">
       <span className="brand-mark brand-mark-lg"><Icon name="chat" size={26} /></span>
-      <div className="boot-title">Furry Everpony</div>
+      <div className="boot-title">Everony</div>
       <div className="boot-sub">正在连接你的世界</div>
       <Spinner size={20} />
     </div>

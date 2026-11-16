@@ -3497,7 +3497,9 @@ body,
   margin: 0 auto;
 }
 .plaza-grid {
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  /* auto-fit + 上限宽度：Bot 少时整排居中，不会左边挤两张卡、右边空一大片 */
+  grid-template-columns: repeat(auto-fit, minmax(280px, 340px));
+  justify-content: center;
   gap: 12px;
 }
 .plaza-card {
@@ -3524,6 +3526,49 @@ body,
   opacity: 0.65;
   transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
+/* 广场底部「怎么玩」三格：只在桌面铺开，手机端压缩成两行 */
+.plaza-how {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  max-width: 1180px;
+  margin: 18px auto 0;
+}
+.plaza-how-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 15px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+  text-align: left;
+}
+.plaza-how-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  border: 1px solid rgba(75, 225, 255, 0.26);
+  background: rgba(75, 225, 255, 0.1);
+  color: var(--cyan);
+}
+.plaza-how-item strong {
+  display: block;
+  color: var(--text-1);
+  font-size: 0.84rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.plaza-how-item span {
+  display: block;
+  color: var(--text-3);
+  font-size: 0.74rem;
+  line-height: 1.6;
+}
+
 .plaza-foot {
   display: flex;
   flex-wrap: wrap;
@@ -3622,6 +3667,14 @@ body,
   .plaza-card {
     padding: 13px 14px;
   }
+  .plaza-how {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .plaza-how-item {
+    padding: 13px 14px;
+  }
   .plaza-foot {
     margin-top: 22px;
     flex-direction: column;
@@ -3654,3 +3707,114 @@ body,
   }
 }
 
+
+
+/* ---------- 管理后台 ---------- */
+.admin-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 22px 32px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  overflow-y: auto;
+  height: 100%;
+}
+.admin-head h2 { margin: 0; font-size: 19px; letter-spacing: 0.2px; }
+.admin-head p { margin: 4px 0 0; font-size: 12.5px; color: var(--text-3); }
+
+.admin-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 10px;
+}
+.admin-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md, 12px);
+  background: var(--bg-panel, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+}
+.admin-stat b {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  line-height: 1.2;
+}
+.admin-stat span { font-size: 11.5px; color: var(--text-3); }
+
+.admin-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.admin-tabs button {
+  padding: 7px 15px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--text-2);
+  background: var(--bg-panel, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  transition: color 0.18s, border-color 0.18s, background 0.18s;
+}
+.admin-tabs button.on {
+  color: var(--text-1);
+  border-color: var(--brand, #22d3ee);
+  background: color-mix(in srgb, var(--brand, #22d3ee) 16%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand, #22d3ee) 30%, transparent) inset;
+}
+
+.admin-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.admin-search { flex: 1 1 240px; min-width: 0; }
+.admin-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.admin-filters button {
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-3);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  background: transparent;
+}
+.admin-filters button.on { color: var(--brand, #22d3ee); border-color: var(--brand, #22d3ee); }
+
+.admin-list { display: flex; flex-direction: column; gap: 8px; }
+.admin-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border-radius: var(--radius-md, 12px);
+  background: var(--bg-panel, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  transition: border-color 0.18s, background 0.18s;
+}
+.admin-row:hover { border-color: var(--line-strong, rgba(255, 255, 255, 0.2)); background: var(--bg-hover, rgba(255, 255, 255, 0.06)); }
+.admin-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.admin-row-main b { font-size: 13.5px; font-weight: 600; color: var(--text-1); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.admin-row-main span { font-size: 12px; color: var(--text-3); overflow-wrap: anywhere; }
+.admin-row-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.admin-msg-time { font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+.admin-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1.5px 7px;
+  border-radius: 6px;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  white-space: nowrap;
+}
+.admin-tag.bot { color: var(--violet, #a855f7); border-color: color-mix(in srgb, var(--violet, #a855f7) 45%, transparent); background: color-mix(in srgb, var(--violet, #a855f7) 12%, transparent); }
+.admin-tag.ok { color: var(--success, #22c55e); border-color: color-mix(in srgb, var(--success, #22c55e) 45%, transparent); background: color-mix(in srgb, var(--success, #22c55e) 12%, transparent); }
+.admin-tag.danger { color: var(--danger, #ff4d4f); border-color: color-mix(in srgb, var(--danger, #ff4d4f) 45%, transparent); background: color-mix(in srgb, var(--danger, #ff4d4f) 12%, transparent); }
+.admin-busy { padding: 30px 0; text-align: center; color: var(--text-3); font-size: 13px; }
+
+@media (max-width: 720px) {
+  .admin-page { padding: 14px 12px 90px; }
+  .admin-stats { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px; }
+  .admin-stat { padding: 10px 11px; }
+  .admin-stat b { font-size: 17px; }
+  .admin-row { align-items: flex-start; flex-wrap: wrap; }
+  .admin-row-actions { width: 100%; justify-content: flex-start; }
+}

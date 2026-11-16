@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { createReadStream, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces } from 'node:os';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -62,7 +62,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.16.0.10.20';
+const VERSION = '2026.11.16.0.10.21';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -116,6 +116,25 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const code = err && err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
     reply.code(code).send({ error: code === 500 ? '服务器出错了，稍后再试' : err.message });
   });
+
+  /* 平台管理员：FE_ADMIN_NUMBERS（逗号分隔号码）优先；一个都没有就把最早注册的用户设为管理员，
+     保证运营者第一次打开网页就有管理入口。 */
+  try {
+    const listed = String(process.env.FE_ADMIN_NUMBERS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const n of listed) db.prepare('UPDATE accounts SET is_admin = 1 WHERE number = ?').run(n);
+    const anyAdmin = db.prepare('SELECT 1 FROM accounts WHERE is_admin = 1 LIMIT 1').get();
+    if (!anyAdmin) {
+      const first = db
+        .prepare("SELECT id FROM accounts WHERE type = 'user' ORDER BY created_at ASC LIMIT 1")
+        .get();
+      if (first) db.prepare('UPDATE accounts SET is_admin = 1 WHERE id = ?').run(first.id);
+    }
+  } catch (e) {
+    console.warn('[startup] admin bootstrap skipped:', e.message);
+  }
 
   // 历史数据修复：Bot 必须和它的主人互为好友，否则主人连自己的 Bot 都点不开
   try {
@@ -336,12 +355,14 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     if (!token) return null;
     const row = db
       .prepare(
-        `SELECT a.id, a.number, a.type, a.nickname, a.bio, a.avatar, a.status
+        `SELECT a.id, a.number, a.type, a.nickname, a.bio, a.avatar, a.status, a.is_admin, a.banned
            FROM sessions s JOIN accounts a ON a.id = s.account_id
           WHERE s.token = ?`,
       )
       .get(token);
     if (!row) return null;
+    // 被封禁的账号当作未登录，所有接口一律 401
+    if (Number(row.banned) === 1) return null;
     db.prepare('UPDATE sessions SET last_seen = ? WHERE token = ?').run(Date.now(), token);
     return row;
   }
@@ -359,7 +380,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
   function findAccountByNumber(number) {
     return db
       .prepare(
-        'SELECT id, number, type, nickname, bio, avatar, card_bg, photos, owner_id, is_public, tags, email FROM accounts WHERE number = ?',
+        'SELECT id, number, type, nickname, bio, avatar, card_bg, photos, owner_id, is_public, tags, email, is_admin, banned, ban_reason FROM accounts WHERE number = ?',
       )
       .get(number);
   }
@@ -925,9 +946,13 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
       .run(number, nickname, hashPassword(password), Date.now(), email);
 
     const accountId = Number(info.lastInsertRowid);
+    /* 空库第一个注册的人就是站长：不然新部署永远进不了管理台 */
+    const hasAdmin = db.prepare('SELECT 1 FROM accounts WHERE is_admin = 1 LIMIT 1').get();
+    const becomesAdmin = !hasAdmin;
+    if (becomesAdmin) db.prepare('UPDATE accounts SET is_admin = 1 WHERE id = ?').run(accountId);
     return {
       token: issueSession(accountId),
-      account: { id: accountId, number, nickname, type: 'user', bio: '', avatar: '', email, tags: [] },
+      account: { id: accountId, number, nickname, type: 'user', bio: '', avatar: '', email, tags: [], is_admin: becomesAdmin },
     };
   });
 
@@ -950,13 +975,16 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const row = db
       .prepare(
         byEmail
-          ? 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash FROM accounts WHERE email = ?'
-          : 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash FROM accounts WHERE number = ?',
+          ? 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash, is_admin, banned, ban_reason FROM accounts WHERE email = ?'
+          : 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash, is_admin, banned, ban_reason FROM accounts WHERE number = ?',
       )
       .get(byEmail ? raw.toLowerCase() : raw);
 
     if (!row || !verifyPassword(parsed.data.password, row.password_hash)) {
       return reply.code(401).send({ error: byEmail ? '邮箱或密码不对' : '号码或密码不对' });
+    }
+    if (Number(row.banned) === 1) {
+      return reply.code(403).send({ error: '这个账号已被封禁' + (row.ban_reason ? '：' + row.ban_reason : '') });
     }
 
     return {
@@ -970,6 +998,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
         avatar: row.avatar || '',
         email: row.email || '',
         tags: parseTags(row.tags),
+        is_admin: Number(row.is_admin) === 1,
       },
     };
   });
@@ -980,7 +1009,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     if (!me) return;
     const row = db
       .prepare(
-        'SELECT id, number, type, nickname, bio, avatar, card_bg, photos, status, owner_id, created_at, email, tags FROM accounts WHERE id = ?',
+        'SELECT id, number, type, nickname, bio, avatar, card_bg, photos, status, owner_id, created_at, email, tags, is_admin, banned FROM accounts WHERE id = ?',
       )
       .get(me.id);
     return {
@@ -988,9 +1017,210 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
         ...row,
         photos: parsePhotos(row.photos),
         tags: parseTags(row.tags),
+        is_admin: Number(row.is_admin) === 1,
         ...presenceOf(me.id),
       },
     };
+  });
+
+  /* ---------- 访问入口信息（不需要登录：设置页和扫码都要用） ---------- */
+  function lanAddresses() {
+    const out = [];
+    const ifaces = networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const info of ifaces[name] || []) {
+        if (info.family === 'IPv4' && !info.internal) out.push({ iface: name, address: info.address });
+      }
+    }
+    return out;
+  }
+
+  /* ---------- 平台管理（只有 is_admin 能进） ---------- */
+  function requireAdmin(req, reply) {
+    const me = requireAuth(req, reply);
+    if (!me) return null;
+    if (Number(me.is_admin) !== 1) {
+      reply.code(403).send({ error: '只有管理员能进这里' });
+      return null;
+    }
+    return me;
+  }
+
+  function startOfToday() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  app.get('/api/admin/overview', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const one = (sql, ...args) => db.prepare(sql).get(...args) || {};
+    const today = startOfToday();
+    let dbBytes = 0;
+    try {
+      dbBytes = statSync(process.env.FE_DB || join(DATA_DIR, 'everpony.db')).size;
+    } catch {
+      /* 统计不到就算了 */
+    }
+    return {
+      version: VERSION,
+      counts: {
+        accounts: one('SELECT COUNT(*) AS n FROM accounts').n || 0,
+        users: one("SELECT COUNT(*) AS n FROM accounts WHERE type = 'user'").n || 0,
+        bots: one("SELECT COUNT(*) AS n FROM accounts WHERE type = 'bot'").n || 0,
+        publicBots: one("SELECT COUNT(*) AS n FROM accounts WHERE type = 'bot' AND is_public = 1").n || 0,
+        messages: one('SELECT COUNT(*) AS n FROM messages').n || 0,
+        groups: one('SELECT COUNT(*) AS n FROM groups').n || 0,
+        admins: one('SELECT COUNT(*) AS n FROM accounts WHERE is_admin = 1').n || 0,
+        banned: one('SELECT COUNT(*) AS n FROM accounts WHERE banned = 1').n || 0,
+        newAccountsToday: one('SELECT COUNT(*) AS n FROM accounts WHERE created_at >= ?', today).n || 0,
+        messagesToday: one('SELECT COUNT(*) AS n FROM messages WHERE created_at >= ?', today).n || 0,
+        onlineNow: one('SELECT COUNT(DISTINCT account_id) AS n FROM sessions WHERE last_seen >= ?', Date.now() - ONLINE_WINDOW).n || 0,
+      },
+      dbBytes,
+      uptimeSec: Math.round(process.uptime()),
+    };
+  });
+
+  app.get('/api/admin/accounts', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z
+      .object({
+        q: z.string().trim().max(64).optional(),
+        limit: z.coerce.number().int().min(1).max(200).optional(),
+        filter: z.enum(['all', 'user', 'bot', 'banned', 'admin']).optional(),
+      })
+      .safeParse(req.query || {});
+    if (!parsed.success) return reply.code(400).send({ error: '查询参数不对' });
+    const q = (parsed.data.q || '').trim();
+    const limit = parsed.data.limit || 100;
+    const filter = parsed.data.filter || 'all';
+    const where = [];
+    const args = [];
+    if (q) {
+      where.push('(a.number LIKE ? OR a.nickname LIKE ? OR IFNULL(a.email, \'\') LIKE ?)');
+      const like = '%' + q + '%';
+      args.push(like, like, like);
+    }
+    if (filter === 'user') where.push("a.type = 'user'");
+    if (filter === 'bot') where.push("a.type = 'bot'");
+    if (filter === 'banned') where.push('a.banned = 1');
+    if (filter === 'admin') where.push('a.is_admin = 1');
+    const rows = db
+      .prepare(
+        `SELECT a.id, a.number, a.nickname, a.type, a.email, a.bio, a.avatar, a.status,
+                a.created_at, a.is_admin, a.banned, a.ban_reason, a.is_public, a.owner_id,
+                (SELECT COUNT(*) FROM messages m WHERE m.sender_id = a.id) AS msg_count
+           FROM accounts a
+          ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+          ORDER BY a.created_at DESC LIMIT ?`,
+      )
+      .all(...args, limit);
+    return {
+      accounts: rows.map((r) => ({
+        ...r,
+        is_admin: Number(r.is_admin) === 1,
+        banned: Number(r.banned) === 1,
+        is_public: Number(r.is_public) === 1,
+      })),
+    };
+  });
+
+  app.post('/api/admin/accounts/:number/ban', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z
+      .object({ banned: z.boolean(), reason: z.string().trim().max(120).optional() })
+      .safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: '参数不对' });
+    const target = findAccountByNumber(req.params.number);
+    if (!target) return reply.code(404).send({ error: '没有这个账号' });
+    if (parsed.data.banned && target.id === me.id) return reply.code(400).send({ error: '不能封禁自己' });
+    if (parsed.data.banned && Number(target.is_admin) === 1) {
+      return reply.code(400).send({ error: '先取消对方的管理员身份' });
+    }
+    const banned = parsed.data.banned;
+    const reason = banned ? parsed.data.reason || '' : '';
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE accounts SET banned = ?, ban_reason = ? WHERE id = ?').run(banned ? 1 : 0, reason, target.id);
+      // 封禁立刻踢下线，别等 token 自然过期
+      if (banned) db.prepare('DELETE FROM sessions WHERE account_id = ?').run(target.id);
+    });
+    tx();
+    return { ok: true, number: target.number, banned };
+  });
+
+  app.post('/api/admin/accounts/:number/admin', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z.object({ admin: z.boolean() }).safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: '参数不对' });
+    const target = findAccountByNumber(req.params.number);
+    if (!target) return reply.code(404).send({ error: '没有这个账号' });
+    if (target.id === me.id && !parsed.data.admin) {
+      return reply.code(400).send({ error: '不能取消自己的管理员身份' });
+    }
+    db.prepare('UPDATE accounts SET is_admin = ? WHERE id = ?').run(parsed.data.admin ? 1 : 0, target.id);
+    return { ok: true, number: target.number, admin: parsed.data.admin };
+  });
+
+  app.get('/api/admin/bots', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const rows = db
+      .prepare(
+        `SELECT a.id, a.number, a.nickname, a.bio, a.avatar, a.is_public, a.owner_id, a.created_at,
+                o.number AS owner_number, o.nickname AS owner_nickname,
+                (SELECT COUNT(*) FROM messages m WHERE m.sender_id = a.id) AS msg_count
+           FROM accounts a LEFT JOIN accounts o ON o.id = a.owner_id
+          WHERE a.type = 'bot' ORDER BY a.created_at DESC LIMIT 200`,
+      )
+      .all();
+    return {
+      bots: rows.map((r) => ({ ...r, is_public: Number(r.is_public) === 1, online: onebot.isOnline(r.id) })),
+    };
+  });
+
+  app.post('/api/admin/bots/:number/public', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z.object({ isPublic: z.boolean() }).safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: '参数不对' });
+    const target = findAccountByNumber(req.params.number);
+    if (!target || target.type !== 'bot') return reply.code(404).send({ error: '没有这个 Bot' });
+    db.prepare('UPDATE accounts SET is_public = ? WHERE id = ?').run(parsed.data.isPublic ? 1 : 0, target.id);
+    return { ok: true, number: target.number, isPublic: parsed.data.isPublic };
+  });
+
+  app.get('/api/admin/messages', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z
+      .object({ limit: z.coerce.number().int().min(1).max(200).optional() })
+      .safeParse(req.query || {});
+    if (!parsed.success) return reply.code(400).send({ error: '查询参数不对' });
+    const rows = db
+      .prepare(
+        `SELECT m.id, m.conversation_id, m.body, m.kind, m.created_at, m.sender_id,
+                a.number AS sender_number, a.nickname AS sender_nickname, a.type AS sender_type
+           FROM messages m JOIN accounts a ON a.id = m.sender_id
+          ORDER BY m.id DESC LIMIT ?`,
+      )
+      .all(parsed.data.limit || 100);
+    return { messages: rows.map((r) => ({ ...r, body: String(r.body || '').slice(0, 300) })) };
+  });
+
+  app.delete('/api/admin/messages/:id', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: '消息编号不对' });
+    const row = db.prepare('SELECT id FROM messages WHERE id = ?').get(id);
+    if (!row) return reply.code(404).send({ error: '没有这条消息' });
+    db.prepare('UPDATE messages SET body = \'[已被管理员删除]\', recalled = 1 WHERE id = ?').run(id);
+    return { ok: true, id };
   });
 
   /* ---------- 改资料 ---------- */
@@ -3316,13 +3546,23 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const candidates = lanCandidates();
     const lanUrls = candidates.map((item) => `http://${item.address}:${PORT}`);
     const lanNames = candidates.map((item) => item.name);
+    /* 隧道地址由 .tools/tunnel.mjs 写入 data/tunnel.json，没有就是空串 */
+    let tunnel = '';
+    try {
+      const file = join(DATA_DIR, 'tunnel.json');
+      if (existsSync(file)) tunnel = JSON.parse(readFileSync(file, 'utf8')).url || '';
+    } catch {
+      /* 隧道信息坏了不影响主流程 */
+    }
     return {
       version: VERSION,
       port: PORT,
       host: HOST,
       boundToLan: HOST === '0.0.0.0' || HOST === '::',
+      lan: candidates.map((item, i) => ({ name: item.name, url: lanUrls[i] })),
       lanUrls,
       lanNames,
+      tunnel,
       webReady: existsSync(WEB_DIR),
     };
   });

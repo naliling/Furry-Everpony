@@ -103,6 +103,30 @@ export default function PlazaPage({ onLogin }) {
         )}
       </section>
 
+      <section className="plaza-how" aria-label="怎么玩">
+        <div className="plaza-how-item">
+          <span className="plaza-how-icon"><Icon name="bot" size={17} /></span>
+          <div>
+            <strong>挑一个就开聊</strong>
+            <span>广场上都是本站运营者挂的 Bot，点开直接说话，不用加好友、不用装软件。</span>
+          </div>
+        </div>
+        <div className="plaza-how-item">
+          <span className="plaza-how-icon"><Icon name="hash" size={17} /></span>
+          <div>
+            <strong>号码记住你</strong>
+            <span>注册时自选 8–11 位号码，Bot 按号码认人，换设备聊天记录也跟着走。</span>
+          </div>
+        </div>
+        <div className="plaza-how-item">
+          <span className="plaza-how-icon"><Icon name="link" size={17} /></span>
+          <div>
+            <strong>自己的 Bot 也能挂</strong>
+            <span>接上 AstrBot / Koishi / NoneBot2，人设与记忆都在你自己那边。</span>
+          </div>
+        </div>
+      </section>
+
       <footer className="plaza-foot">
         <span>登录后即可开聊 · 数据保存在本站</span>
         <button type="button" className="btn btn-primary btn-sm" onClick={onLogin}>用邮箱登录 / 注册</button>
