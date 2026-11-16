@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <color name="fe_bg">#060910</color>
-    <color name="fe_panel">#0F1522</color>
-    <color name="fe_brand">#7C5CFF</color>
-    <color name="fe_text">#E8ECF6</color>
-    <color name="fe_muted">#8A94AB</color>
-</resources>

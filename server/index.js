@@ -62,7 +62,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.16.0.10.19';
+const VERSION = '2026.11.16.0.10.20';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -3325,83 +3325,6 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
       lanNames,
       webReady: existsSync(WEB_DIR),
     };
-  });
-
-  /* ---------- 手机端 APK：设置页直接把安装包递给手机 ---------- */
-  // 找安装包的位置：环境变量 → 应用目录旁的 dist-apk → 数据目录旁的 apk
-  const APK_DIRS = [
-    process.env.FE_APK_DIR,
-    join(HERE, '..', 'dist-apk'),
-    join(dirname(process.env.FE_DB || join(homedir(), '.furry-everpony', 'data', 'everpony.db')), 'apk'),
-  ].filter(Boolean);
-
-  // 版本号比大小：2026.11.15.0.10.5 比 2026.11.13.0.10.4 新（逐段按数字比，段数不同也能比）
-  function compareVersions(a, b) {
-    const pa = String(a || '').split('.').map((n) => parseInt(n, 10) || 0);
-    const pb = String(b || '').split('.').map((n) => parseInt(n, 10) || 0);
-    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-      const x = pa[i] || 0;
-      const y = pb[i] || 0;
-      if (x !== y) return x - y;
-    }
-    return 0;
-  }
-
-  function latestApk() {
-    let best = null;
-    for (const dir of APK_DIRS) {
-      if (!existsSync(dir)) continue;
-      let names = [];
-      try {
-        names = readdirSync(dir);
-      } catch {
-        continue;
-      }
-      for (const name of names) {
-        if (!/^FurryEverpony-.+\.apk$/i.test(name)) continue;
-        const file = join(dir, name);
-        try {
-          const st = statSync(file);
-          if (!st.isFile()) continue;
-          const hit = name.match(/^FurryEverpony-(.+)\.apk$/i);
-          const version = hit ? hit[1] : '';
-          // 先比版本号，版本相同才看谁更新；只看时间会把「刚被复制过的旧包」当成最新
-          const cmp = best ? compareVersions(version, best.version) : 1;
-          if (!best || cmp > 0 || (cmp === 0 && st.mtimeMs > best.mtimeMs)) {
-            best = { file, name, size: st.size, mtimeMs: st.mtimeMs, version };
-          }
-        } catch {
-          // 单个文件读不到就跳过，不影响其它目录
-        }
-      }
-    }
-    return best;
-  }
-
-  app.get('/api/apk/info', async (req, reply) => {
-    const me = requireAuth(req, reply);
-    if (!me) return;
-    const apk = latestApk();
-    if (!apk) return { available: false };
-    return {
-      available: true,
-      name: apk.name,
-      version: apk.version,
-      size: apk.size,
-      updatedAt: apk.mtimeMs,
-      url: '/apk',
-    };
-  });
-
-  // 故意不做登录校验：手机第一次装 App 时还没登录，浏览器直接下更方便
-  app.get('/apk', async (req, reply) => {
-    const apk = latestApk();
-    if (!apk) return reply.code(404).send({ error: '这台电脑上还没有打包好的 APK' });
-    return reply
-      .type('application/vnd.android.package-archive')
-      .header('Content-Disposition', `attachment; filename="${apk.name}"`)
-      .header('Cache-Control', 'no-cache')
-      .send(createReadStream(apk.file));
   });
 
   /* ---------- 上传（图片/文件/语音统一走这里，不再把大图塞进消息体） ---------- */

@@ -1,3 +1,16 @@
+# v2026.11.16.0.10.20 — 2026-11-16
+
+## 彻底拆掉客户端：只剩一个后台服务 + 浏览器
+
+上一版还是「网页能用，但软件还在」。这一版把软件本身删了——因为它的唯一不可替代作用是**托管服务端进程**，而这件事一个无窗口的后台进程就能做，不需要 159 MB 的外壳。
+
+- **服务端独立运行**：`server/index.js` 不再由 Electron 启动，改为独立后台进程（Windows 用 `wscript` 隐藏窗口启动，`.tools/start-server.vbs` 带端口占用检查），并放进开机启动项 `Startup\EveronyServer.vbs`；崩溃/重启后网页端无感。
+- **数据库搬出 AppData**：从 `%APPDATA%\furry-everpony\data\everpony.db` 迁到项目 `data/everpony.db`（该目录原先写入报 `attempt to write a readonly database`）。迁移核对：12 个账号、108 条消息、2 个 Bot 全部在位。
+- **删除 Electron 外壳**：`electron/` 目录、`package.json` 的 `main`/`start`/`dist`/`pack` 脚本、`electron` 与 `electron-builder` 依赖、整个 `build` 打包段全部移除。
+- **删除安卓 App**：`android/` 源码目录与 `dist-apk/` 产物移除；手机改用浏览器「添加到主屏幕」，不再需要安装包。
+- **服务端删掉 APK 分发接口**：`GET /api/apk/info` 与 `GET /apk` 整段删除（含 `APK_DIRS` / `compareVersions` / `latestApk`）。
+- **设置页删掉 APK 与「连接的实例」区块**：`Settings.jsx` 不再请求安装包状态，也不再显示安卓专属的实例切换。
+- **发布流程简化**：以前是「打包 exe → 部署到安装目录 → 重启应用」，现在是「`vite build` → 重启后台进程」，一次发布从几分钟缩到几秒。
 # v2026.11.16.0.10.19 — 2026-11-16
 
 ## P1 整改：广场做首页 + 邮箱注册 + 8–11 位号码 + Bot 标签

@@ -53,15 +53,10 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
   const [sendMode, setSendMode] = useState(() => storageGet(SEND_MODE_KEY) || 'enter');
   const [notify, setNotify] = useState(() => storageGet(NOTIFY_KEY) !== '0');
   const [server, setServer] = useState(null);
-  const [apk, setApk] = useState(null);
   const [closeToTray, setCloseToTray] = useState(false);
   const [lanAccess, setLanAccess] = useState(false);
   const [firewall, setFirewall] = useState({ busy: false, ok: false, text: '' });
   const isDesktop = typeof window !== 'undefined' && !!window.feWin;
-  // 安卓 App 特有：可以连到电脑版/朋友的实例，连同一个实例号码才互通
-  const androidApp = typeof window !== 'undefined' && !!window.feAndroid;
-  const androidRemote = androidApp && typeof window.feAndroid.remoteMode === 'function' ? !!window.feAndroid.remoteMode() : false;
-  const androidBase = androidApp && typeof window.feAndroid.server === 'function' ? String(window.feAndroid.server() || '') : '';
   const [confirm, setConfirm] = useState(null);
   const [saved, setSaved] = useState('');
   const fileRef = useRef(null);
@@ -190,13 +185,6 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
 
   useEffect(() => {
     api('/api/server-info', { token }).then((data) => setServer(normalizeServerInfo(data))).catch(() => setServer(false));
-  }, [token]);
-
-  // 手机上装 App 比用浏览器顺，这里把安装包状态问一下服务端
-  useEffect(() => {
-    api('/api/apk/info', { token })
-      .then((data) => setApk(data || { available: false }))
-      .catch(() => setApk(false));
   }, [token]);
 
   useEffect(() => {
@@ -550,19 +538,6 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
             ) : null}
             <div className="settings-row">
               <div className="settings-row-main">
-                <b><Icon name="phone" size={16} /> 手机端 App（APK）</b>
-                <span>
-                  {apk === null
-                    ? '检查中…'
-                    : apk.available === false
-                      ? (apk.message || '这台电脑上还没有打包好的 APK，可以先用手机浏览器打开上面的地址')
-                      : `版本 ${apk.version} · ${fmtSize(apk.size)} · 手机装上是独立应用，不用连电脑`}
-                </span>
-              </div>
-              {apk && apk.available ? <a className="btn btn-primary btn-sm" href="/apk" download={apk.name}>下载 APK</a> : null}
-            </div>
-            <div className="settings-row">
-              <div className="settings-row-main">
                 <b><Icon name="shield" size={16} /> 放行防火墙</b>
                 <span>{firewall.text || '让 Windows 放行 7788 端口，手机才连得上'}</span>
               </div>
@@ -570,20 +545,6 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
                 {firewall.busy ? <Spinner size={15} /> : <Icon name="shield" size={15} />} {firewall.ok ? '已放行' : '放行防火墙'}
               </button>
             </div>
-          </section>
-        ) : null}
-
-        {androidApp ? (
-          <section className="settings-card">
-            <header className="settings-card-head"><h3><Icon name="link" size={17} /> 连接的实例</h3></header>
-            <div className="settings-row">
-              <div className="settings-row-main">
-                <b>{androidRemote ? '连到别的实例' : '本机模式（数据在这台手机里）'}</b>
-                <span>{androidRemote && androidBase ? androidBase : '号码只在这台手机上'}</span>
-              </div>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => window.feAndroid.switchServer()}>切换</button>
-            </div>
-            <p className="settings-hint">本机模式下，别人的手机加不到你的号。想加电脑版的号，点「切换」填那台电脑的地址（电脑版「我的 → 关于」里有），登录同一个实例号码就通了。</p>
           </section>
         ) : null}
 
