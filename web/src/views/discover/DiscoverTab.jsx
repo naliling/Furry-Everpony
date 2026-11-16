@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
 import { Avatar, Badge, Empty, Modal, SkeletonList, Spinner, Tabs, Toggle, toast } from '../../ui/primitives.jsx';
-import { api } from '../../lib/api.js';
+import { api, serverBase } from '../../lib/api.js';
 import { fmtCount } from '../../lib/format.js';
 
 export default function DiscoverTab({ token, me, initialView, onBotSession, onOpenConversation }) {
@@ -79,6 +79,7 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
     try { await navigator.clipboard.writeText(text); toast(label, 'success'); } catch { toast('复制失败，请手动复制', 'error'); }
   };
 
+  const siteHost = (typeof window !== 'undefined' && window.location.host) || serverBase() || '本机';
   const plazaList = publicBots || [];
   const mine = myBots || [];
 
@@ -134,6 +135,24 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
                 ))}
               </div>
             )}
+            <div className="plaza-site-strip">
+              <div className="plaza-site-cell">
+                <span>本站地址</span>
+                <strong title={siteHost}>{siteHost}</strong>
+              </div>
+              <div className="plaza-site-cell">
+                <span>公开 Bot</span>
+                <strong>{plazaList.length}</strong>
+              </div>
+              <div className="plaza-site-cell">
+                <span>在线</span>
+                <strong>{plazaList.filter((b) => b.online).length}</strong>
+              </div>
+              <div className="plaza-site-cell">
+                <span>数据存放</span>
+                <strong>只在本站</strong>
+              </div>
+            </div>
           </>
         ) : (
           <>

@@ -315,7 +315,7 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
           <div className="settings-profile">
             <button type="button" className="avatar-edit" onClick={() => fileRef.current?.click()} title="更换头像">
               <Avatar number={me?.number} nickname={me?.nickname} avatar={me?.avatar} size={64} status={profile.status} />
-              <span className="avatar-edit-hint"><Icon name="camera" size={13} /> 换</span>
+              <span className="avatar-edit-hint" aria-hidden><Icon name="camera" size={13} /></span>
             </button>
             <input ref={fileRef} type="file" accept="image/*" hidden onChange={pickAvatar} />
             <div className="settings-profile-main">

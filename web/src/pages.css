@@ -903,8 +903,46 @@
 }
 .bot-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(252px, 1fr));
+  /* 固定三列：Bot 少时也铺满整行，不会左边几张、右边空一条 */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+@media (max-width: 1120px) {
+  .bot-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* 登录态广场底部：站点信息条（地址 / Bot 数 / 在线 / 数据位置） */
+.plaza-site-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+  padding: 13px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012));
+}
+.plaza-site-cell span {
+  display: block;
+  color: var(--text-3);
+  font-size: 0.7rem;
+}
+.plaza-site-cell strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-1);
+  font-size: 0.82rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 779px) {
+  .plaza-site-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px 14px;
+  }
 }
 .bot-card {
   position: relative;
@@ -1277,22 +1315,29 @@
   box-shadow: 0 0 0 3px var(--bg-panel), 0 10px 26px -14px rgba(0, 0, 0, 0.8);
 }
 .avatar-edit-hint {
+  /* 头像右下角的圆形相机按钮：比原来的「换」小胶囊清楚，也不会压住头像 */
   position: absolute;
-  left: 50%;
-  bottom: -4px;
-  transform: translateX(-50%);
+  right: -3px;
+  bottom: -3px;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  height: 18px;
-  padding: 0 7px;
-  border-radius: 99px;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
   border: 1px solid var(--line-strong);
   background: var(--bg-elev);
   color: var(--text-2);
-  font-size: 0.6rem;
-  white-space: nowrap;
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.9);
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
+.avatar-edit:hover .avatar-edit-hint {
+  border-color: rgba(75, 225, 255, 0.55);
+  color: var(--cyan);
+  transform: scale(1.06);
+}
+
 .settings-profile-main {
   flex: 1;
   min-width: 0;
