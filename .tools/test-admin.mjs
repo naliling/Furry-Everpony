@@ -29,7 +29,11 @@ let adminTok=null, userTok=null, userNumber='3881000002', adminNumber='388100000
     return r.data.account.is_admin === true;
   });
   await t('第二个注册者是普通用户', async()=>{
-    const r = await j('/api/register',{method:'POST',body:{...(await solveCaptcha()),email:'u@example.com',number:userNumber,password:PWD,nickname:'路人'}});
+    /* v0.10.25 起注册要过邀请码（或邮箱码），先让站长发一个 */
+    const inv = await j('/api/admin/invites',{method:'POST',token:adminTok,body:{count:1,maxUses:1}});
+    if(inv.status!==200) throw new Error('生成邀请码失败 '+JSON.stringify(inv.data));
+    const invite = inv.data.codes[0];
+    const r = await j('/api/register',{method:'POST',body:{...(await solveCaptcha()),email:'u@example.com',number:userNumber,password:PWD,nickname:'路人',invite}});
     if(r.status!==200) throw new Error(JSON.stringify(r.data));
     userTok = r.data.token;
     return r.data.account.is_admin === false;

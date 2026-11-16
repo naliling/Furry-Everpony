@@ -30,14 +30,6 @@ const AVATAR_FRAMES = [
   { id: 'orbit', name: '星环' },
 ];
 
-const NAME_FONTS = [
-  { id: 'default', name: '默认' },
-  { id: 'round', name: '圆润' },
-  { id: 'serif', name: '衬线' },
-  { id: 'mono', name: '等宽' },
-  { id: 'bold', name: '加粗' },
-];
-
 const FONTS = [
   { id: 's', name: '小', sample: '14' },
   { id: 'm', name: '中', sample: '15' },
@@ -61,19 +53,51 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
   const [saved, setSaved] = useState('');
   const fileRef = useRef(null);
 
-  /* ---- 头像框 / 昵称字体（本地偏好，套在 html 上让全局 CSS 生效） ---- */
+  /* ---- 我的邀请码（站里注册要凭邀请码，这里给自己一个，可发 5 次） ---- */
+  const [invite, setInvite] = useState(null);
+  useEffect(() => {
+    api('/api/me/invite', { token }).then(setInvite).catch(() => setInvite(false));
+  }, [token]);
+
+  /* ---- 注销账号：1–3 天冷静期，到期自动真删 ---- */
+  const [delPwd, setDelPwd] = useState('');
+  const [delDays, setDelDays] = useState(3);
+  const [delBusy, setDelBusy] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(Number(me?.pendingDelete) || 0);
+  useEffect(() => { setPendingDelete(Number(me?.pendingDelete) || 0); }, [me]);
+
+  const submitDelete = async () => {
+    if (!delPwd) { toast('先输入密码确认是你本人', 'error'); return; }
+    setDelBusy(true);
+    try {
+      const r = await api('/api/me/delete', { method: 'POST', token, body: { password: delPwd, days: delDays } });
+      setDelPwd('');
+      setPendingDelete(Number(r.deleteAt) || Date.now());
+      toast('已提交注销，' + delDays + ' 天后生效', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setDelBusy(false);
+    }
+  };
+
+  const cancelDelete = async () => {
+    try {
+      await api('/api/me/delete/cancel', { method: 'POST', token });
+      setPendingDelete(0);
+      toast('已撤销注销', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+
+  /* ---- 头像框（本地偏好，套在 html 上让全局 CSS 生效） ---- */
   const [frame, setFrame] = useState(() => storageGet('fe_avatar_frame') || 'none');
-  const [nameFont, setNameFont] = useState(() => storageGet('fe_name_font') || 'default');
 
   useEffect(() => {
     document.documentElement.dataset.avatarFrame = frame;
     storageSet('fe_avatar_frame', frame);
   }, [frame]);
-
-  useEffect(() => {
-    document.documentElement.dataset.nameFont = nameFont;
-    storageSet('fe_name_font', nameFont);
-  }, [nameFont]);
 
   /* ---- 聊天背景：和聊天页的背景面板共用 lib/chatBg.js，localStorage 只有一份 ---- */
   const [chatBg, setChatBg] = useState(() => readChatBg());
@@ -427,14 +451,6 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
             </div>
           </div>
           <div className="settings-row">
-            <div className="settings-row-main"><b><Icon name="font" size={16} /> 昵称字体</b><span>只改昵称的字体，不动正文</span></div>
-            <div className="segmented">
-              {NAME_FONTS.map((item) => (
-                <button type="button" key={item.id} className={nameFont === item.id ? 'on' : ''} onClick={() => setNameFont(item.id)}>{item.name}</button>
-              ))}
-            </div>
-          </div>
-          <div className="settings-row">
             <div className="settings-row-main"><b><Icon name="keyboard" size={16} /> 发送方式</b><span>{sendMode === 'enter' ? 'Enter 发送，Shift+Enter 换行' : 'Ctrl+Enter 发送，Enter 换行'}</span></div>
             <div className="segmented">
               <button type="button" className={sendMode === 'enter' ? 'on' : ''} onClick={() => changeSendMode('enter')}>Enter 发送</button>
@@ -571,6 +587,24 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
           </div>
         </section>
 
+        <section className="settings-card">
+          <header className="settings-card-head">
+            <h3><Icon name="mail" size={17} /> 我的邀请码</h3>
+            {invite && invite.maxUses ? <span className="settings-hint">已用 {invite.used || 0}/{invite.maxUses}</span> : null}
+          </header>
+          {invite === null ? <SkeletonList rows={1} /> : invite === false ? (
+            <p className="settings-hint">没读到邀请码，刷新一下再试。</p>
+          ) : (
+            <>
+              <p className="settings-hint">站里注册要凭邀请码。把下面这串发给朋友，他们就能注册进来，一共 5 个名额。</p>
+              <div className="invite-box">
+                <code>{invite.code}</code>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => copy(invite.code)}><Icon name="copy" size={14} /> 复制</button>
+              </div>
+            </>
+          )}
+        </section>
+
         {isDesktop ? (
           <section className="settings-card">
             <header className="settings-card-head"><h3><Icon name="monitor" size={17} /> 桌面窗口</h3></header>
@@ -589,6 +623,8 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
           </section>
         ) : null}
 
+        {/* 访问入口是站长自己的运维信息，别人看不到，也不需要看到 */}
+        {isAdmin ? (
         <section className="settings-card">
           <header className="settings-card-head"><h3><Icon name="wifi" size={17} /> 访问入口</h3></header>
           {server && (server.lan?.length || server.lanUrls?.length) ? (
@@ -653,32 +689,40 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
             </div>
           ) : null}
         </section>
-
-        <FederationCard token={token} />
-
-        <BackupCard token={token} />
+        ) : null}
 
         <section className="settings-card">
           <header className="settings-card-head"><h3><Icon name="info" size={17} /> 关于</h3></header>
-          {server === null ? <SkeletonList rows={2} /> : server === false ? <p className="settings-hint">读取实例信息失败，可能服务端版本较旧。</p> : (
-            <div className="about-list">
-              <div className="about-row"><span>版本</span><b>{server.version || '—'}</b></div>
-              <div className="about-row"><span>平台</span><b>{platform}</b></div>
-              <div className="about-row"><span>监听地址</span><b>{server.host === '::' ? '全部网卡（IPv4 + IPv6）' : server.host || '0.0.0.0'}:{server.port || '—'}</b></div>
-              <div className="about-row"><span>局域网可访问</span><b>{server.boundToLan ? '是' : '否'}</b></div>
-              {server.lanUrls?.length ? (
-                <div className="about-lan">
-                  <span>手机访问地址</span>
-                  {server.lanUrls.map((url) => (
-                    <button type="button" key={url} className="about-url" onClick={() => copy(url)} title="点击复制">
-                      <code>{url}</code><Icon name="copy" size={14} />
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              <div className="about-row"><span>我的号码</span><b>{me?.number || '—'}</b></div>
-              <p className="settings-hint">Everony 是自托管、去中心化的聊天软件：每个实例有自己的数据库和用户，实例之间可以互加好友。<br />数据都在你自己的电脑上，换台机器请备份 data 目录。</p>
-            </div>
+          {server === null ? <SkeletonList rows={2} /> : (
+            <>
+              <div className="about-list">
+                <div className="about-row"><span>版本</span><b>{server === false ? '—' : server.version || '—'}</b></div>
+                <div className="about-row"><span>平台</span><b>{platform}</b></div>
+                <div className="about-row"><span>我的号码</span><b>{me?.number || '—'}</b></div>
+              </div>
+
+              <div className="about-block">
+                <b>Everony 是什么</b>
+                <p>一个自己开的聊天站。账号、消息、Bot 全都跑在一台机器上，数据只留在那台机器里，不经过任何第三方服务器。打开浏览器就能用，手机电脑都行。</p>
+              </div>
+
+              <div className="about-block">
+                <b>为什么做它</b>
+                <p>主流聊天软件把你的账号、好友关系、聊天记录都放在别人的服务器上；想换个地方说话，就得把整个社交圈一起搬走。Everony 反过来：站是你的，数据是你的，号码是你的。你可以在自己的电脑上开一个站，喊朋友进来；也可以随时关掉它，什么都不留。</p>
+              </div>
+
+              <div className="about-block">
+                <b>它能干什么</b>
+                <ul className="about-points">
+                  <li><b>用号码找到人</b><span>每个人一个固定号码，像门牌号，加好友、开群聊都靠它。</span></li>
+                  <li><b>Bot 就住在站里</b><span>你建的 Bot 有自己的号码和密码，登录进去就是它的身份，资料由你改。</span></li>
+                  <li><b>数据有期限</b><span>消息默认只留 14 天，站长可调，过期自动清掉，不占硬盘。</span></li>
+                  <li><b>不装软件也能用</b><span>手机扫个码就在浏览器里聊，电脑上可以直接钉在桌面。</span></li>
+                </ul>
+              </div>
+
+              <p className="settings-hint">这一版还在改，看到不顺眼的地方直接跟站长说。</p>
+            </>
           )}
         </section>
 
@@ -705,383 +749,36 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
               <Icon name="trash" size={15} /> 清空本地数据
             </button>
           </div>
+
+          <div className="settings-row settings-row-col">
+            <div className="settings-row-main">
+              <b>注销账号</b>
+              <span className="danger-note">
+                {pendingDelete > 0
+                  ? '已申请注销，' + new Date(pendingDelete).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' 生效。这期间登录回来点下面的按钮就能撤销。'
+                  : '提交后进入冷静期，1–3 天里随时可以撤销；到期后账号和它的消息会被真的删掉，找不回来。'}
+              </span>
+            </div>
+            {pendingDelete > 0 ? (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={cancelDelete}><Icon name="refresh" size={15} /> 撤销注销</button>
+            ) : (
+              <div className="danger-inline">
+                <input className="input" type="password" placeholder="输入密码确认" value={delPwd} onChange={(e) => setDelPwd(e.target.value)} />
+                <div className="segmented">
+                  {[1, 2, 3].map((d) => (
+                    <button type="button" key={d} className={delDays === d ? 'on' : ''} onClick={() => setDelDays(d)}>{d} 天</button>
+                  ))}
+                </div>
+                <button type="button" className="btn btn-danger btn-sm" disabled={delBusy || !delPwd} onClick={() => setConfirm({ title: '注销账号？', message: '提交后 ' + delDays + ' 天内可以撤销，到期后账号、好友关系、消息全部删除，无法恢复。', danger: true, confirmText: '确定注销', onConfirm: submitDelete })}>
+                  {delBusy ? <Spinner size={14} /> : <Icon name="trash" size={15} />} 注销
+                </button>
+              </div>
+            )}
+          </div>
         </section>
       </div>
 
       {confirm ? <Confirm title={confirm.title} message={confirm.message} danger={confirm.danger} onConfirm={confirm.onConfirm} onClose={() => setConfirm(null)} /> : null}
     </div>
-  );
-}
-
-/* ---------------- 实例互联：我的地址 + 附近的实例 ---------------- */
-function FederationCard({ token }) {
-  const [info, setInfo] = useState(null);
-  const [nearby, setNearby] = useState([]);
-  const [addr, setAddr] = useState('');
-  const [relayUrl, setRelayUrl] = useState('');
-  const [relayBusy, setRelayBusy] = useState(false);
-  const [host, setHost] = useState(null);
-  const [scanRelay, setScanRelay] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-
-  const load = useCallback(async () => {
-    try {
-      const [i, n, h] = await Promise.all([
-        api('/api/federation/info', { token }).catch(() => null),
-        api('/api/federation/nearby', { token }).catch(() => ({ instances: [] })),
-        api('/api/relay/host', { token }).catch(() => null),
-      ]);
-      setInfo(i);
-      if (h) setHost(h);
-      if (i?.publicAddr) setAddr(i.publicAddr);
-      /* 只在第一次填进来，别把用户正在输入的内容每 6 秒覆盖掉 */
-      setRelayUrl((old) => old || i?.relay?.url || '');
-      setNearby((n.instances || []).filter((x) => x.instanceId !== i?.instanceId));
-    } catch {
-      /* 忽略 */
-    }
-  }, [token]);
-
-  useEffect(() => {
-    load();
-    /* 附近实例靠 UDP 广播发现，定时刷新即可看到刚上线的设备 */
-    const timer = setInterval(load, 6000);
-    return () => clearInterval(timer);
-  }, [load]);
-
-  const save = async () => {
-    setBusy(true);
-    setErr('');
-    try {
-      const out = await api('/api/federation/settings', { method: 'PATCH', token, body: { publicAddr: addr.trim(), autoAccept: info?.autoAccept } });
-      setInfo((old) => ({ ...(old || {}), publicAddr: out.publicAddr }));
-      toast(addr.trim() ? '已保存对外地址' : '已清空对外地址', 'success');
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveRelay = async () => {
-    setRelayBusy(true);
-    setErr('');
-    try {
-      const out = await api('/api/relay/settings', { method: 'PATCH', token, body: { url: relayUrl.trim() } });
-      setInfo((old) => ({ ...(old || {}), relay: { ...(old?.relay || {}), enabled: out.enabled, url: out.url, registered: out.registered, lastError: out.lastError } }));
-      if (!out.enabled) toast('已关闭中继，只走直连', 'success');
-      else if (out.registered) toast('中继已连上：' + out.url, 'success');
-      else toast('中继地址已保存，但还没连上' + (out.registerError ? '：' + out.registerError : ''), 'error');
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setRelayBusy(false);
-    }
-  };
-
-  const toggleHost = async (next) => {
-    setHost((old) => ({ ...(old || {}), enabled: next, state: next ? 'starting' : 'off' }));
-    try {
-      const out = await api('/api/relay/host', { method: 'POST', token, body: { enabled: next } });
-      setHost(out);
-      if (!next) toast('已关闭本机中转站', 'success');
-      else if (out.state === 'error') toast(out.error || '开启失败', 'error');
-      else if (out.url) toast('中转站已开：' + out.url, 'success');
-      else toast('正在启动隧道，十几秒后再看这里', 'success');
-    } catch (e) {
-      setHost((old) => ({ ...(old || {}), enabled: !next }));
-      toast(e.message, 'error');
-    }
-  };
-
-  const copyText = async (text) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast('已复制：' + text, 'success');
-    } catch {
-      toast(text, 'success');
-    }
-  };
-
-  const mine = info?.publicAddr || info?.myAddresses?.[0] || '';
-
-  return (
-    <section className="settings-card">
-      <header className="settings-card-head"><h3><Icon name="link" size={17} /> 实例互联</h3></header>
-      <p className="settings-hint">每个实例就是一台电脑上的独立服务。把自己的地址给对方、把对方的地址填进来，就能跨实例加好友、聊天，不需要任何中心服务器。</p>
-
-      {/* 中心服务器模式：手机/别的电脑在登录页填这里显示的地址，就都连到这台服务器 */}
-      <div className="settings-row settings-row-server">
-        <div className="settings-row-main">
-          <b><Icon name="wifi" size={16} /> 手机/别的电脑连我这台服务器</b>
-          <span>
-            登录页的「服务器」里填下面这条，然后用自己的号码登录：同一个 Wi-Fi 填局域网地址，不同网络填公网地址。
-          </span>
-          <div className="settings-server-list">
-            {info?.myAddresses?.[0] ? (
-              <div className="settings-server-item">
-                <em>局域网</em>
-                <code>{info.myAddresses[0]}</code>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(info.myAddresses[0])}>
-                  <Icon name="copy" size={13} /> 复制
-                </button>
-              </div>
-            ) : null}
-            {host?.url || info?.relay?.publicUrl ? (
-              <div className="settings-server-item">
-                <em>公网</em>
-                <code>{host?.url || info?.relay?.publicUrl}</code>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(host?.url || info?.relay?.publicUrl)}>
-                  <Icon name="copy" size={13} /> 复制
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
-      <div className="settings-row">
-        <div className="settings-row-main">
-          <b><Icon name="link" size={16} /> 我的实例地址</b>
-          <span>{mine ? mine : '还没探测到可用地址，可以在下面手动填写（例如 1.2.3.4:7788）'}</span>
-        </div>
-        {mine ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(mine)}><Icon name="copy" size={14} /> 复制</button> : null}
-      </div>
-
-      {info?.publicV6?.length ? (
-        <div className="settings-row">
-          <div className="settings-row-main">
-            <b><Icon name="qr" size={16} /> 公网 IPv6（不在同一个 Wi-Fi 也能被连上）</b>
-            <span>{info.publicV6.join('   ')}</span>
-          </div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(info.publicV6[0])}><Icon name="copy" size={14} /> 复制</button>
-        </div>
-      ) : (
-        <p className="settings-hint">这台电脑没有探测到公网 IPv6。没有 IPv6 时，跨网络只能靠下面手填公网 IP 或 DDNS。</p>
-      )}
-
-      <div className="settings-row">
-        <div className="settings-row-main">
-          <b><Icon name="check" size={16} /> 自动通过好友</b>
-          <span>{info?.autoAccept ? '开着：别人拿我的邀请码/二维码加我，直接成为好友，我不用点同意' : '关着：别人加我，我要在「新朋友」里点同意'}</span>
-        </div>
-        <Toggle
-          label="自动通过好友"
-          checked={!!info?.autoAccept}
-          onChange={async (next) => {
-            setInfo((old) => ({ ...(old || {}), autoAccept: next }));
-            try {
-              const out = await api('/api/federation/settings', { method: 'PATCH', token, body: { autoAccept: next } });
-              setInfo((old) => ({ ...(old || {}), autoAccept: out.autoAccept }));
-              toast(next ? '已开启自动通过' : '已关闭自动通过', 'success');
-            } catch (e) {
-              setInfo((old) => ({ ...(old || {}), autoAccept: !next }));
-              toast(e.message, 'error');
-            }
-          }}
-        />
-      </div>
-
-      <div className="settings-row">
-        <div className="settings-row-main">
-          <b><Icon name="shield" size={16} /> 中继服务器（跨网络兜底）</b>
-          <span>
-            {info?.relay?.enabled
-              ? info.relay.registered
-                ? '已连上 ' + info.relay.url + '：两边直连不通时，好友申请和消息会经中继排队，对方上线后自动收到'
-                : '地址已保存，但还没连上' + (info.relay.lastError ? '：' + info.relay.lastError : '')
-              : '没配：只能靠直连（同一个 Wi-Fi，或对方有公网地址）。配一台中继后，两边不同网络也能加好友、发消息'}
-          </span>
-        </div>
-      </div>
-
-      <div className="fed-row">
-        <label className="field">
-          <span className="field-label">中继地址（留空 = 只用直连）</span>
-          <div className="input-wrap">
-            <Icon name="shield" size={15} className="input-lead" />
-            <input className="input" placeholder="例如 relay.example.com:7800" value={relayUrl} onChange={(e) => setRelayUrl(e.target.value.trim())} />
-          </div>
-        </label>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setScanRelay(true)}><Icon name="qr" size={14} /> 扫码</button>
-        <button type="button" className="btn btn-primary btn-sm" disabled={relayBusy} onClick={saveRelay}>{relayBusy ? <Spinner size={14} /> : null} 保存</button>
-      </div>
-
-      {host ? (
-      <div className="settings-row">
-        <div className="settings-row-main">
-          <b><Icon name="link" size={16} /> 把这台电脑做成中转站</b>
-          <span>
-            {host?.state === 'running' && host?.url
-              ? '公网地址：' + host.url + '（手机扫下面的二维码就能填好）'
-              : host?.enabled
-                ? host.state === 'error'
-                  ? '开启失败：' + (host.error || '未知原因')
-                  : '正在启动隧道…第一次要下载约 55MB，稍等十几秒'
-                : '开着它，这台电脑就是一台公网中继：别的设备不在同一个网络也能加好友、发消息（电脑要一直开着）'}
-          </span>
-        </div>
-        <Toggle label="本机做中转站" checked={!!host?.enabled} onChange={toggleHost} />
-      </div>
-      ) : null}
-
-      {host?.url ? (
-        <div className="fed-host">
-          <div className="fed-host-main">
-            <b>手机扫这个码</b>
-            <span>扫完自动填好中继地址，不用手打</span>
-          </div>
-          <QrCode text={host.url} size={150} />
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(host.url)}><Icon name="copy" size={14} /> 复制地址</button>
-        </div>
-      ) : null}
-
-      {scanRelay ? (
-        <QrScanner
-          title="扫电脑上的中转地址"
-          onClose={() => setScanRelay(false)}
-          onResult={(text) => {
-            setScanRelay(false);
-            setRelayUrl(String(text || '').trim());
-            toast('已扫到：' + text, 'success');
-          }}
-        />
-      ) : null}
-
-      <div className="fed-row">
-        <label className="field">
-          <span className="field-label">对外地址（跨网络时填公网 IP / DDNS）</span>
-          <div className="input-wrap">
-            <Icon name="link" size={15} className="input-lead" />
-            <input className="input" placeholder="例如 fe.example.com:7788" value={addr} onChange={(e) => setAddr(e.target.value.trim())} />
-          </div>
-        </label>
-        <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={save}>{busy ? <Spinner size={14} /> : null} 保存</button>
-      </div>
-      {err ? <div className="auth-error">{err}</div> : null}
-
-      {nearby.length ? (
-        <div className="fed-nearby">
-          <span className="field-label">同一个 Wi-Fi 下发现 {nearby.length} 个实例</span>
-          {nearby.map((item) => (
-            <button type="button" key={item.instanceId} className="fed-nearby-item" onClick={() => copyText(item.addr)}>
-              <Icon name="wifi" size={15} />
-              <span className="fed-nearby-addr">{item.addr}</span>
-              <span className="fed-nearby-meta">{item.version || ''}</span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p className="settings-hint">还没发现同一个 Wi-Fi 下的其它实例。对方也要装本应用并打开着，才会互相看到。</p>
-      )}
-    </section>
-  );
-}
-
-/* ---------------- 账号搬迁：导出 / 导入加密包 ---------------- */
-function BackupCard({ token }) {
-  const [pwd, setPwd] = useState('');
-  const [busy, setBusy] = useState('');
-  const [err, setErr] = useState('');
-  const [importPwd, setImportPwd] = useState('');
-  const [importFile, setImportFile] = useState(null);
-  const fileRef = useRef(null);
-
-  const doExport = async () => {
-    if (pwd.length < 6) { setErr('密码至少 6 位'); return; }
-    setBusy('export');
-    setErr('');
-    try {
-      const out = await api('/api/account/export', { method: 'POST', token, body: { password: pwd } });
-      const blob = new Blob([JSON.stringify(out.package)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = out.filename || 'furry-everpony.feacct';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-      toast('已导出账号包，请连同密码一起收好', 'success');
-      setPwd('');
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setBusy('');
-    }
-  };
-
-  const pickFile = async (file) => {
-    if (!file) return;
-    setErr('');
-    try {
-      const text = await file.text();
-      setImportFile({ name: file.name, pkg: JSON.parse(text) });
-    } catch {
-      setErr('这个文件不是账号备份（应该是 .feacct / .json）');
-    }
-  };
-
-  const doImport = async () => {
-    if (!importFile) { setErr('先选一个账号包文件'); return; }
-    setBusy('import');
-    setErr('');
-    try {
-      const out = await api('/api/account/import', { method: 'POST', body: { password: importPwd, package: importFile.pkg } });
-      try { localStorage.setItem(TOKEN_KEY, out.token); } catch { /* 忽略 */ }
-      toast('账号已搬过来，正在重新载入', 'success');
-      setTimeout(() => location.reload(), 600);
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setBusy('');
-    }
-  };
-
-  return (
-    <section className="settings-card">
-      <header className="settings-card-head"><h3><Icon name="download" size={17} /> 账号搬迁</h3></header>
-      <p className="settings-hint">换电脑、换手机时用这个：导出成加密包，在新设备上导入，好友、会话、消息、群、收藏都会回来，原密码照样能登录。包是加密的，只有密码能打开，请把密码另外记住。</p>
-
-      <div className="settings-row">
-        <div className="settings-row-main">
-          <b><Icon name="download" size={16} /> 导出这台设备上的账号</b>
-          <span>导出时设一个打开密码（至少 6 位），文件后缀 .feacct</span>
-        </div>
-      </div>
-      <div className="fed-row">
-        <label className="field">
-          <span className="field-label">打开密码</span>
-          <input className="input" type="password" autoComplete="new-password" placeholder="至少 6 位" value={pwd} onChange={(e) => setPwd(e.target.value)} />
-        </label>
-        <button type="button" className="btn btn-primary btn-sm" disabled={busy === 'export'} onClick={doExport}>
-          {busy === 'export' ? <Spinner size={14} /> : <Icon name="download" size={14} />} 导出
-        </button>
-      </div>
-
-      <div className="settings-row">
-        <div className="settings-row-main">
-          <b><Icon name="arrowUp" size={16} /> 在这台设备导入账号</b>
-          <span>{importFile ? '已选：' + importFile.name : '选择之前导出的 .feacct 文件，再输入那个打开密码'}</span>
-        </div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()}>
-          <Icon name="arrowUp" size={14} /> 选择文件
-        </button>
-        <input ref={fileRef} type="file" accept=".feacct,.json,application/json" hidden onChange={(e) => pickFile(e.target.files?.[0])} />
-      </div>
-      {importFile ? (
-        <div className="fed-row">
-          <label className="field">
-            <span className="field-label">备份的打开密码</span>
-            <input className="input" type="password" placeholder="导出时设的密码" value={importPwd} onChange={(e) => setImportPwd(e.target.value)} />
-          </label>
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy === 'import' || !importPwd} onClick={doImport}>
-            {busy === 'import' ? <Spinner size={14} /> : null} 导入并登录
-          </button>
-        </div>
-      ) : null}
-      {err ? <div className="auth-error">{err}</div> : null}
-    </section>
   );
 }

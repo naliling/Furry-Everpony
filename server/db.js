@@ -421,5 +421,38 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_login_logs_ip ON login_logs(ip);
     CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);
   `);
+
+  /* ---------- v0.10.25：邀请码 / 邮箱验证 / 注销冷静期 / 数据保留 ---------- */
+  /* 注销不是立刻删：先记下时间，冷静期（默认 3 天）内还能撤销，到期才真删 */
+  if (!hasColumn(db, 'accounts', 'deleted_at')) {
+    db.exec('ALTER TABLE accounts ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0');
+  }
+
+  db.exec(`
+    /* 邀请码：站长在管理台生成，可以一码一次也可以一码多次，可设有效期 */
+    CREATE TABLE IF NOT EXISTS invite_codes (
+      code       TEXT PRIMARY KEY,
+      created_by INTEGER,
+      max_uses   INTEGER NOT NULL DEFAULT 1,
+      used       INTEGER NOT NULL DEFAULT 0,
+      expires_at INTEGER NOT NULL DEFAULT 0,
+      note       TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+
+    /* 邮箱验证码：注册前发到邮箱，10 分钟有效，一次性，错 5 次作废 */
+    CREATE TABLE IF NOT EXISTS email_codes (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      email      TEXT NOT NULL,
+      code       TEXT NOT NULL,
+      purpose    TEXT NOT NULL DEFAULT 'register',
+      tries      INTEGER NOT NULL DEFAULT 0,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_email_codes_email ON email_codes(email, created_at);
+    CREATE INDEX IF NOT EXISTS idx_invite_codes_created ON invite_codes(created_at);
+  `);
 }
 

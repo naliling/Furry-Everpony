@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces } from 'node:os';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -13,6 +13,7 @@ import { createFederation, normalizeAddr, parseInvite } from './federation.js';
 import { createRelayClient, normalizeRelayUrl } from './relay-client.js';
 import { createRelayHost } from './relay-host.js';
 import { collectAccount, openPackage, restoreAccount, sealPackage } from './backup.js';
+import { sendMail } from './mail.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = join(HERE, '..', 'dist', 'web');
@@ -62,7 +63,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.17.0.10.24';
+const VERSION = '2026.11.17.0.10.25';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -407,6 +408,76 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const m = getSetting('registerMode', 'approval');
     return ['open', 'approval', 'closed'].includes(m) ? m : 'approval';
   };
+
+  /* 注册门禁：both 邮箱码或邀请码都行 / invite 只认邀请码 / email 只认邮箱码 / none 只图形码 */
+  const registerGate = () => {
+    const g = getSetting('registerGate', 'both');
+    return ['none', 'invite', 'email', 'both'].includes(g) ? g : 'both';
+  };
+
+  const smtpConfig = () => ({
+    host: getSetting('smtpHost', '').trim(),
+    port: Number(getSetting('smtpPort', '587')) || 587,
+    secure: getSetting('smtpSecure', '0') === '1',
+    user: getSetting('smtpUser', '').trim(),
+    pass: getSetting('smtpPass', ''),
+    from: getSetting('smtpFrom', '').trim(),
+    fromName: getSetting('smtpFromName', 'Everony').trim() || 'Everony',
+  });
+  const smtpReady = () => Boolean(smtpConfig().host);
+
+  /* 数据保留天数：默认 14 天，1–365 可调，0 = 永久保留 */
+  const retentionDays = () => {
+    const n = Number(getSetting('retentionDays', '14'));
+    if (!Number.isFinite(n)) return 14;
+    return Math.max(0, Math.min(365, Math.trunc(n)));
+  };
+
+  /* 邀请码：去掉容易看错的 0/O/1/I，8 位，人念得出来 */
+  const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  function newInviteCode() {
+    let out = '';
+    const bytes = randomBytes(8);
+    for (let i = 0; i < 8; i += 1) out += INVITE_ALPHABET[bytes[i] % INVITE_ALPHABET.length];
+    return out;
+  }
+  function findInvite(code) {
+    const c = String(code || '').trim().toUpperCase();
+    if (!c) return null;
+    const row = db.prepare('SELECT * FROM invite_codes WHERE code = ?').get(c);
+    if (!row) return null;
+    if (Number(row.expires_at) > 0 && Number(row.expires_at) < Date.now()) return null;
+    if (Number(row.used) >= Number(row.max_uses)) return null;
+    return row;
+  }
+  /* 核销一次邀请码：返回 null = 通过，返回字符串 = 给用户看的错误 */
+  function consumeInvite(code) {
+    const row = findInvite(code);
+    if (!row) return '邀请码不对，或者已经用过了';
+    db.prepare('UPDATE invite_codes SET used = used + 1 WHERE code = ?').run(row.code);
+    return null;
+  }
+  function consumeEmailCode(email, code) {
+    const row = db.prepare('SELECT * FROM email_codes WHERE email = ? ORDER BY id DESC LIMIT 1').get(email);
+    if (!row) return '请先点「发送验证码」';
+    if (Number(row.expires_at) < Date.now()) return '验证码过期了，重新发一次';
+    if (Number(row.tries) >= 5) return '验证码错太多次了，重新发一次';
+    if (String(row.code) !== String(code || '').trim()) {
+      db.prepare('UPDATE email_codes SET tries = tries + 1 WHERE id = ?').run(row.id);
+      return '验证码不对';
+    }
+    db.prepare('DELETE FROM email_codes WHERE email = ?').run(email);
+    return null;
+  }
+
+  /* 真删账号：外键全是 ON DELETE CASCADE，删主表就连带清干净 */
+  function hardDeleteAccount(accountId) {
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM sessions WHERE account_id = ?').run(accountId);
+      db.prepare('DELETE FROM accounts WHERE id = ?').run(accountId);
+    });
+    tx();
+  }
 
   /* ---------- IP 封禁（30 秒缓存，别每个请求都查库） ---------- */
   let banCache = { at: 0, set: new Set() };
@@ -1022,6 +1093,8 @@ const registerHits = new Map();
 const globalHits = new Map();
 const loginFailHits = new Map();
 const loginAccountFail = new Map();
+const emailCodeIpHits = new Map();
+const emailCodeAddrHits = new Map();
 
 const sweepMap = (map, ttl) => {
   const now = Date.now();
@@ -1091,10 +1164,12 @@ app.get('/api/captcha', async (req, reply) => {
       nickname: z.string().trim().min(1, '昵称不能为空').max(24, '昵称最多 24 个字'),
       captchaId: z.string({ error: '验证码过期了，点图片换一张' }).trim().min(1, '验证码过期了，点图片换一张'),
       captcha: z.string({ error: '请输入图片里的验证码' }).trim().min(1, '请输入图片里的验证码'),
+      invite: z.string().trim().max(64).optional(),
+      emailCode: z.string().trim().max(8).optional(),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
-    const { email, number, password, nickname, captchaId, captcha } = parsed.data;
+    const { email, number, password, nickname, captchaId, captcha, invite, emailCode } = parsed.data;
 
     /* 同一 IP 10 分钟最多 5 次注册，挡住脚本批量刷号 */
     if (!hitAllowed(registerHits, req.ip || 'local', 20, 10 * 60 * 1000)) {
@@ -1124,31 +1199,57 @@ app.get('/api/captcha', async (req, reply) => {
       return reply.code(409).send({ error: '这个号码已经被用了' });
     }
 
-    /* 站点注册模式：open 直接进 / approval 等站长放行 / closed 关站。
+    /* 站点注册模式：closed 关站；其余注册即通过（不再有「等站长审核」这一步）。
        空库第一人不走这套 —— 新部署必须有人能进去当站长。 */
     const isEmptySite = !db.prepare('SELECT 1 FROM accounts LIMIT 1').get();
-    const mode = registerMode();
-    if (!isEmptySite && mode === 'closed') {
+    if (!isEmptySite && registerMode() === 'closed') {
       return reply.code(403).send({ error: '本站已关闭注册' });
     }
-    const needReview = !isEmptySite && mode === 'approval';
+
+    /* 注册门禁：邮箱验证码 / 邀请码，至少要过一道（站长可在管理台关掉） */
+    if (!isEmptySite) {
+      const gate = registerGate();
+      if (gate !== 'none') {
+        const wantEmail = gate === 'email' || gate === 'both';
+        const wantInvite = gate === 'invite' || gate === 'both';
+        let passed = false;
+        let emailErr = '';
+        if (wantEmail && emailCode) {
+          if (!smtpReady()) emailErr = '本站没配发信服务，请用邀请码注册';
+          else {
+            const err = consumeEmailCode(email, emailCode);
+            if (!err) passed = true;
+            else emailErr = err;
+          }
+        }
+        let inviteErr = '';
+        if (!passed && wantInvite && invite) {
+          const err = consumeInvite(invite);
+          if (!err) passed = true;
+          else inviteErr = err;
+        }
+        if (!passed) {
+          if (gate === 'email') return reply.code(400).send({ error: emailErr || '请输入邮箱验证码' });
+          if (gate === 'invite') return reply.code(400).send({ error: inviteErr || '请输入邀请码' });
+          return reply.code(400).send({
+            error: inviteErr || emailErr || (smtpReady() ? '请填邮箱验证码或邀请码' : '请输入邀请码'),
+          });
+        }
+      }
+    }
 
     const info = db
       .prepare(
         `INSERT INTO accounts (number, type, nickname, password_hash, created_at, email, tags, approved)
-         VALUES (?, 'user', ?, ?, ?, ?, '[]', ?)`,
+         VALUES (?, 'user', ?, ?, ?, ?, '[]', 1)`,
       )
-      .run(number, nickname, hashPassword(password), Date.now(), email, needReview ? 0 : 1);
+      .run(number, nickname, hashPassword(password), Date.now(), email);
 
     const accountId = Number(info.lastInsertRowid);
     /* 空库第一个注册的人就是站长：不然新部署永远进不了管理台 */
     const hasAdmin = db.prepare('SELECT 1 FROM accounts WHERE is_admin = 1 LIMIT 1').get();
     const becomesAdmin = !hasAdmin;
     if (becomesAdmin) db.prepare('UPDATE accounts SET is_admin = 1 WHERE id = ?').run(accountId);
-    if (needReview) {
-      logLogin({ accountId, number, ...requestMeta(req), ok: 0, reason: '注册待审核' });
-      return { pending: true, message: '注册成功，等站长审核通过后就能登录' };
-    }
     return {
       token: issueSession(accountId, req),
       account: { id: accountId, number, nickname, type: 'user', bio: '', avatar: '', email, tags: [], is_admin: becomesAdmin },
@@ -1174,8 +1275,8 @@ app.get('/api/captcha', async (req, reply) => {
     const row = db
       .prepare(
         byEmail
-          ? 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash, is_admin, banned, ban_reason, approved FROM accounts WHERE email = ?'
-          : 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash, is_admin, banned, ban_reason, approved FROM accounts WHERE number = ?',
+          ? 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash, is_admin, banned, ban_reason, approved, deleted_at FROM accounts WHERE email = ?'
+          : 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash, is_admin, banned, ban_reason, approved, deleted_at FROM accounts WHERE number = ?',
       )
       .get(byEmail ? raw.toLowerCase() : raw);
 
@@ -1197,6 +1298,13 @@ app.get('/api/captcha', async (req, reply) => {
       logLogin({ accountId: row.id, number: row.number, ...meta, ok: 0, reason: '待审核' });
       return reply.code(403).send({ error: '账号还在等站长审核' });
     }
+    /* 注销冷静期：到期就真删；没到期允许登录，让本人还能撤销 */
+    const delAt = Number(row.deleted_at || 0);
+    if (delAt > 0 && delAt <= Date.now()) {
+      hardDeleteAccount(row.id);
+      logLogin({ number: raw, ...meta, ok: 0, reason: '账号已注销' });
+      return reply.code(410).send({ error: '这个账号已经注销了' });
+    }
     logLogin({ accountId: row.id, number: row.number, ...meta, ok: 1, reason: '登录成功' });
     db.prepare('UPDATE accounts SET last_login_ip = ?, last_login_at = ? WHERE id = ?').run(meta.ip, Date.now(), row.id);
 
@@ -1212,6 +1320,7 @@ app.get('/api/captcha', async (req, reply) => {
         email: row.email || '',
         tags: parseTags(row.tags),
         is_admin: Number(row.is_admin) === 1,
+        pendingDelete: delAt > 0 ? delAt : 0,
       },
     };
   });
@@ -1222,7 +1331,7 @@ app.get('/api/captcha', async (req, reply) => {
     if (!me) return;
     const row = db
       .prepare(
-        'SELECT id, number, type, nickname, bio, avatar, card_bg, photos, status, owner_id, created_at, email, tags, is_admin, banned FROM accounts WHERE id = ?',
+        'SELECT id, number, type, nickname, bio, avatar, card_bg, photos, status, owner_id, created_at, email, tags, is_admin, banned, deleted_at FROM accounts WHERE id = ?',
       )
       .get(me.id);
     return {
@@ -1231,6 +1340,7 @@ app.get('/api/captcha', async (req, reply) => {
         photos: parsePhotos(row.photos),
         tags: parseTags(row.tags),
         is_admin: Number(row.is_admin) === 1,
+        pendingDelete: Number(row.deleted_at || 0),
         ...presenceOf(me.id),
       },
     };
@@ -1353,6 +1463,278 @@ app.get('/api/captcha', async (req, reply) => {
     if (!parsed.success) return reply.code(400).send({ error: '注册模式只能是 open / approval / closed' });
     setSetting('registerMode', parsed.data.registerMode);
     return { ok: true, registerMode: parsed.data.registerMode };
+  });
+
+  /* ---------- 站点公开信息（登录页要知道要不要邀请码） ---------- */
+  app.get('/api/site', async () => ({
+    version: VERSION,
+    siteName: getSetting('siteName', 'Everony'),
+    registerMode: registerMode(),
+    registerGate: registerGate(),
+    smtpReady: smtpReady(),
+    retentionDays: retentionDays(),
+  }));
+
+  /* ---------- 邮箱验证码（注册前先发码） ---------- */
+  app.post('/api/email-code', async (req, reply) => {
+    const parsed = z.object({ email: emailSchema }).safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
+    const email = parsed.data.email;
+    const meta = requestMeta(req);
+    if (!smtpReady()) return reply.code(400).send({ error: '本站没配发信服务，请用邀请码注册' });
+    if (!hitAllowed(emailCodeIpHits, meta.ip, 5, 10 * 60 * 1000) || !hitAllowed(emailCodeAddrHits, email, 3, 10 * 60 * 1000)) {
+      return reply.code(429).send({ error: '发太频繁了，10 分钟后再试' });
+    }
+    if (db.prepare('SELECT 1 FROM accounts WHERE email = ?').get(email)) {
+      return reply.code(409).send({ error: '这个邮箱已经注册过了，直接登录吧' });
+    }
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const now = Date.now();
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM email_codes WHERE email = ?').run(email);
+      db.prepare(
+        'INSERT INTO email_codes (email, code, purpose, tries, expires_at, created_at) VALUES (?, ?, ?, 0, ?, ?)',
+      ).run(email, code, 'register', now + 10 * 60 * 1000, now);
+    });
+    tx();
+    try {
+      await sendMail(smtpConfig(), {
+        to: email,
+        subject: 'Everony 注册验证码',
+        text: '你的验证码是 ' + code + '，10 分钟内有效。\n如果不是你本人在注册，忽略这封邮件就行。',
+      });
+    } catch (err) {
+      db.prepare('DELETE FROM email_codes WHERE email = ?').run(email);
+      return reply.code(502).send({ error: '邮件没发出去：' + (err && err.message ? err.message : '发信配置有问题') });
+    }
+    return { ok: true, expiresIn: 600 };
+  });
+
+  /* ---------- 管理台：站点设置（发信 / 注册门禁 / 数据保留） ---------- */
+  app.get('/api/admin/site', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const cfg = smtpConfig();
+    return {
+      registerMode: registerMode(),
+      registerGate: registerGate(),
+      retentionDays: retentionDays(),
+      smtpReady: smtpReady(),
+      smtp: {
+        host: cfg.host,
+        port: cfg.port,
+        secure: cfg.secure,
+        user: cfg.user,
+        hasPass: Boolean(cfg.pass),
+        from: cfg.from,
+        fromName: cfg.fromName,
+      },
+    };
+  });
+
+  app.patch('/api/admin/site', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z
+      .object({
+        registerMode: z.enum(['open', 'approval', 'closed']).optional(),
+        registerGate: z.enum(['none', 'invite', 'email', 'both']).optional(),
+        retentionDays: z.coerce.number().int().min(0).max(365).optional(),
+        smtpHost: z.string().trim().max(120).optional(),
+        smtpPort: z.coerce.number().int().min(1).max(65535).optional(),
+        smtpSecure: z.boolean().optional(),
+        smtpUser: z.string().trim().max(120).optional(),
+        smtpPass: z.string().max(200).optional(),
+        smtpFrom: z.string().trim().max(120).optional(),
+        smtpFromName: z.string().trim().max(40).optional(),
+      })
+      .safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
+    const p = parsed.data;
+    if (p.registerMode !== undefined) setSetting('registerMode', p.registerMode);
+    if (p.registerGate !== undefined) setSetting('registerGate', p.registerGate);
+    if (p.retentionDays !== undefined) setSetting('retentionDays', String(p.retentionDays));
+    if (p.smtpHost !== undefined) setSetting('smtpHost', p.smtpHost);
+    if (p.smtpPort !== undefined) setSetting('smtpPort', String(p.smtpPort));
+    if (p.smtpSecure !== undefined) setSetting('smtpSecure', p.smtpSecure ? '1' : '0');
+    if (p.smtpUser !== undefined) setSetting('smtpUser', p.smtpUser);
+    /* 密码留空 = 不改，避免前端回显打码值把真密码覆盖掉 */
+    if (p.smtpPass !== undefined && p.smtpPass !== '') setSetting('smtpPass', p.smtpPass);
+    if (p.smtpFrom !== undefined) setSetting('smtpFrom', p.smtpFrom);
+    if (p.smtpFromName !== undefined) setSetting('smtpFromName', p.smtpFromName);
+    return { ok: true, registerGate: registerGate(), retentionDays: retentionDays(), smtpReady: smtpReady() };
+  });
+
+  app.post('/api/admin/site/test-mail', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z.object({ to: emailSchema.optional() }).safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: '收件邮箱格式不对' });
+    const to = parsed.data.to || me.email || '';
+    if (!to) return reply.code(400).send({ error: '填个收件邮箱' });
+    try {
+      await sendMail(smtpConfig(), { to, subject: 'Everony 发信测试', text: '收到这封就说明发信配置没问题。' });
+    } catch (err) {
+      return reply.code(502).send({ error: '没发出去：' + (err && err.message ? err.message : '未知错误') });
+    }
+    return { ok: true, to };
+  });
+
+  /* ---------- 管理台：邀请码 ---------- */
+  app.get('/api/admin/invites', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const rows = db
+      .prepare(
+        `SELECT i.code, i.max_uses, i.used, i.expires_at, i.note, i.created_at,
+                a.number AS by_number, a.nickname AS by_nickname
+           FROM invite_codes i LEFT JOIN accounts a ON a.id = i.created_by
+          ORDER BY i.created_at DESC LIMIT 200`,
+      )
+      .all();
+    return {
+      invites: rows.map((r) => ({
+        ...r,
+        left: Math.max(0, Number(r.max_uses) - Number(r.used)),
+      })),
+    };
+  });
+
+  app.post('/api/admin/invites', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z
+      .object({
+        count: z.coerce.number().int().min(1).max(50).optional(),
+        maxUses: z.coerce.number().int().min(1).max(1000).optional(),
+        expiresInDays: z.coerce.number().int().min(0).max(3650).optional(),
+        note: z.string().trim().max(60).optional(),
+      })
+      .safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: '参数不对' });
+    const count = parsed.data.count || 1;
+    const maxUses = parsed.data.maxUses || 1;
+    const days = parsed.data.expiresInDays || 0;
+    const expiresAt = days > 0 ? Date.now() + days * 86400000 : 0;
+    const note = parsed.data.note || '';
+    const codes = [];
+    const now = Date.now();
+    const tx = db.transaction(() => {
+      for (let i = 0; i < count; i += 1) {
+        let code = newInviteCode();
+        while (db.prepare('SELECT 1 FROM invite_codes WHERE code = ?').get(code)) code = newInviteCode();
+        db.prepare(
+          'INSERT INTO invite_codes (code, created_by, max_uses, used, expires_at, note, created_at) VALUES (?, ?, ?, 0, ?, ?, ?)',
+        ).run(code, me.id, maxUses, expiresAt, note, now);
+        codes.push(code);
+      }
+    });
+    tx();
+    return { ok: true, codes };
+  });
+
+  app.delete('/api/admin/invites/:code', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const code = String(req.params.code || '').trim().toUpperCase();
+    const info = db.prepare('DELETE FROM invite_codes WHERE code = ?').run(code);
+    if (!Number(info.changes)) return reply.code(404).send({ error: '没有这个邀请码' });
+    return { ok: true };
+  });
+
+  /* ---------- 按号码 / 昵称找本站的人（加好友、扫码、搜索都走这里） ---------- */
+  app.get('/api/search/users', async (req, reply) => {
+    const me = requireAuth(req, reply);
+    if (!me) return;
+    const parsed = z
+      .object({ q: z.string().trim().max(64).optional(), limit: z.coerce.number().int().min(1).max(50).optional() })
+      .safeParse(req.query || {});
+    if (!parsed.success) return reply.code(400).send({ error: '搜索词不对' });
+    const q = (parsed.data.q || '').trim();
+    if (!q) return { users: [] };
+    const limit = parsed.data.limit || 20;
+    const like = '%' + q + '%';
+    const rows = db
+      .prepare(
+        `SELECT id, number, type, nickname, bio, avatar, tags, is_public FROM accounts
+          WHERE id != ? AND banned = 0 AND deleted_at = 0
+            AND (number LIKE ? OR nickname LIKE ? OR IFNULL(tags, '') LIKE ?)
+          ORDER BY CASE WHEN number = ? THEN 0 WHEN number LIKE ? THEN 1 ELSE 2 END, nickname
+          LIMIT ?`,
+      )
+      .all(me.id, like, like, like, q, q + '%', limit);
+    const friendSet = new Set(
+      db.prepare('SELECT b_id AS id FROM friendships WHERE a_id = ?').all(me.id).map((r) => Number(r.id)),
+    );
+    return {
+      users: rows.map((r) => ({
+        id: r.id,
+        number: r.number,
+        nickname: r.nickname,
+        type: r.type,
+        bio: r.bio || '',
+        avatar: r.avatar || '',
+        tags: parseTags(r.tags),
+        isPublic: Number(r.is_public) === 1,
+        isFriend: friendSet.has(Number(r.id)),
+      })),
+    };
+  });
+
+  /* ---------- 我的邀请码：每个账号都能拉人，注册时填它就行 ---------- */
+  app.get('/api/me/invite', async (req, reply) => {
+    const me = requireAuth(req, reply);
+    if (!me) return;
+    const mine = db
+      .prepare(
+        `SELECT code, max_uses, used FROM invite_codes
+          WHERE created_by = ? AND (expires_at = 0 OR expires_at > ?)
+          ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(me.id, Date.now());
+    if (mine) return { code: mine.code, used: Number(mine.used), maxUses: Number(mine.max_uses) };
+    let code = newInviteCode();
+    while (db.prepare('SELECT 1 FROM invite_codes WHERE code = ?').get(code)) code = newInviteCode();
+    db.prepare(
+      'INSERT INTO invite_codes (code, created_by, max_uses, used, expires_at, note, created_at) VALUES (?, ?, 5, 0, 0, ?, ?)',
+    ).run(code, me.id, '个人邀请码', Date.now());
+    return { code, used: 0, maxUses: 5 };
+  });
+
+  /* ---------- 注销账号：1–3 天冷静期，到期自动真删 ---------- */
+  app.post('/api/me/delete', async (req, reply) => {
+    const me = requireAuth(req, reply);
+    if (!me) return;
+    const parsed = z
+      .object({
+        password: z.string().min(1, '请填密码确认'),
+        days: z.coerce.number().int().min(1).max(3).optional(),
+      })
+      .safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
+    const row = db.prepare('SELECT password_hash, is_admin FROM accounts WHERE id = ?').get(me.id);
+    if (!row || !verifyPassword(parsed.data.password, row.password_hash)) {
+      return reply.code(401).send({ error: '密码不对' });
+    }
+    if (Number(row.is_admin) === 1) {
+      const admins = db.prepare('SELECT COUNT(*) AS n FROM accounts WHERE is_admin = 1 AND deleted_at = 0').get().n || 0;
+      if (admins <= 1) return reply.code(400).send({ error: '你是唯一的站长，先把管理权限交给别人再注销' });
+    }
+    const days = parsed.data.days || 3;
+    const at = Date.now() + days * 86400000;
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE accounts SET deleted_at = ? WHERE id = ?').run(at, me.id);
+      db.prepare('DELETE FROM sessions WHERE account_id = ?').run(me.id);
+    });
+    tx();
+    return { ok: true, deleteAt: at, days };
+  });
+
+  app.post('/api/me/delete/cancel', async (req, reply) => {
+    const me = requireAuth(req, reply);
+    if (!me) return;
+    db.prepare('UPDATE accounts SET deleted_at = 0 WHERE id = ?').run(me.id);
+    return { ok: true };
   });
 
   /* ---------- 待审核账号 ---------- */
@@ -1525,6 +1907,21 @@ app.get('/api/captcha', async (req, reply) => {
     });
     tx();
     return { ok: true, number: target.number, banned };
+  });
+
+  app.post('/api/admin/accounts/:number/delete', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const target = findAccountByNumber(req.params.number);
+    if (!target) return reply.code(404).send({ error: '没有这个账号' });
+    if (target.id === me.id) return reply.code(400).send({ error: '不能删除自己' });
+    if (Number(target.is_admin) === 1) {
+      const admins = db.prepare('SELECT COUNT(*) AS n FROM accounts WHERE is_admin = 1').get().n || 0;
+      if (admins <= 1) return reply.code(400).send({ error: '这是最后一个站长，不能删' });
+    }
+    /* 消息、会话、好友、群成员这些外键都带 CASCADE，删账号会连带清干净 */
+    hardDeleteAccount(target.id);
+    return { ok: true, number: target.number };
   });
 
   app.post('/api/admin/accounts/:number/admin', async (req, reply) => {
@@ -3198,6 +3595,7 @@ app.get('/api/captcha', async (req, reply) => {
         bio: z.string().max(200).optional(),
         public: z.boolean().optional(),
         tags: tagsSchema.optional(),
+        password: z.string().min(8, '密码至少 8 位').max(128).optional(),
       })
       .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
@@ -3210,12 +3608,13 @@ app.get('/api/captcha', async (req, reply) => {
     const info = db
       .prepare(
         `INSERT INTO accounts (number, type, nickname, bio, password_hash, created_at, owner_id, access_token, is_public, tags)
-         VALUES (?, 'bot', ?, ?, NULL, ?, ?, ?, ?, ?)`,
+         VALUES (?, 'bot', ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         parsed.data.number,
         parsed.data.nickname,
         parsed.data.bio || '',
+        parsed.data.password ? hashPassword(parsed.data.password) : null,
         Date.now(),
         me.id,
         token,
@@ -3238,6 +3637,7 @@ app.get('/api/captcha', async (req, reply) => {
         token,
         public: !!parsed.data.public,
         tags: parsed.data.tags || [],
+        hasPassword: Boolean(parsed.data.password),
       },
       ws: `/onebot/v11/ws`,
     };
@@ -3465,6 +3865,7 @@ app.get('/api/captcha', async (req, reply) => {
         bio: z.string().max(200).optional(),
         public: z.boolean().optional(),
         tags: tagsSchema.optional(),
+        password: z.string().min(8, '密码至少 8 位').max(128).optional(),
       })
       .safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
@@ -3475,17 +3876,19 @@ app.get('/api/captcha', async (req, reply) => {
          nickname = COALESCE(?, nickname),
          bio      = COALESCE(?, bio),
          is_public = COALESCE(?, is_public),
-         tags     = COALESCE(?, tags)
+         tags     = COALESCE(?, tags),
+         password_hash = COALESCE(?, password_hash)
        WHERE id = ?`,
     ).run(
       p.nickname ?? null,
       p.bio ?? null,
       p.public === undefined ? null : p.public ? 1 : 0,
       p.tags === undefined ? null : JSON.stringify(p.tags),
+      p.password ? hashPassword(p.password) : null,
       bot.id,
     );
 
-    return { ok: true };
+    return { ok: true, hasPassword: Boolean(p.password) || Boolean(bot.password_hash) };
   });
 
   app.get('/api/bots', async (req, reply) => {
@@ -4001,6 +4404,64 @@ app.get('/api/captcha', async (req, reply) => {
       return reply.type(MIME[extname(file).toLowerCase()] || 'application/octet-stream').send(createReadStream(file));
     });
   }
+
+  /* ---------- 定时清理：注销到期 + 数据保留期 ---------- */
+  function sweepOnce() {
+    const now = Date.now();
+    /* 1. 注销冷静期到了就真删 */
+    try {
+      const due = db.prepare('SELECT id FROM accounts WHERE deleted_at > 0 AND deleted_at <= ?').all(now);
+      for (const row of due) {
+        try {
+          hardDeleteAccount(row.id);
+          app.log2?.info('[sweep] 注销到期，已删除账号', row.id);
+        } catch (err) {
+          app.log2?.warn('[sweep] 删除账号失败', row.id, err && err.message);
+        }
+      }
+    } catch {
+      /* 数据库暂时不可用，下一轮再来 */
+    }
+
+    /* 2. 数据保留：超过 N 天的消息和没人引用的上传文件一起清掉 */
+    const days = retentionDays();
+    if (days <= 0) return;
+    const before = now - days * 86400000;
+    try {
+      const info = db.prepare('DELETE FROM messages WHERE created_at < ?').run(before);
+      if (Number(info.changes) > 0) app.log2?.info('[sweep] 清理过期消息', info.changes, '条（保留', days, '天）');
+    } catch {
+      /* 同上 */
+    }
+    try {
+      for (const name of readdirSync(UPLOAD_DIR)) {
+        const full = join(UPLOAD_DIR, name);
+        let st;
+        try {
+          st = statSync(full);
+        } catch {
+          continue;
+        }
+        if (!st.isFile()) continue;
+        if (st.mtimeMs >= before) continue;
+        /* 还被消息引用着就不动（历史消息里可能是 /uploads/xxx 链接） */
+        const used = db.prepare('SELECT 1 FROM messages WHERE body LIKE ? LIMIT 1').get('%' + name + '%');
+        if (used) continue;
+        try {
+          rmSync(full, { force: true });
+        } catch {
+          /* 文件被占用，下一轮再说 */
+        }
+      }
+    } catch {
+      /* 上传目录读不到就算了 */
+    }
+  }
+
+  /* 每小时扫一次；unref 让进程该退出时能退出 */
+  const sweepTimer = setInterval(sweepOnce, 60 * 60 * 1000);
+  if (typeof sweepTimer.unref === 'function') sweepTimer.unref();
+  app.decorate('sweepOnce', sweepOnce);
 
   return app;
 }

@@ -15,6 +15,7 @@ const FILTERS = [
 
 const SECTIONS = [
   { id: 'accounts', label: '账号', icon: 'friend' },
+  { id: 'site', label: '站点', icon: 'gear' },
   { id: 'pending', label: '审核', icon: 'check' },
   { id: 'logins', label: '登录记录', icon: 'key' },
   { id: 'guard', label: '防护', icon: 'shield' },
@@ -34,6 +35,13 @@ const MODES = [
   { id: 'open', label: '开放注册', hint: '谁都能注册，注册完就能用' },
   { id: 'approval', label: '需要审核', hint: '新号注册后要你在「审核」里放行' },
   { id: 'closed', label: '关闭注册', hint: '只保留已有账号，不再接受新注册' },
+];
+
+const GATES = [
+  { id: 'both', label: '邮箱码或邀请码', hint: '配了发信就发验证码，没配就走邀请码' },
+  { id: 'invite', label: '只认邀请码', hint: '只有拿到邀请码的人能注册' },
+  { id: 'email', label: '只认邮箱码', hint: '必须填自己邮箱收到的验证码' },
+  { id: 'none', label: '都不要', hint: '谁都能注册（不推荐，容易被刷）' },
 ];
 
 function modeLabel(id) {
@@ -67,6 +75,15 @@ export default function AdminPage({ token, me }) {
   const [newIp, setNewIp] = useState('');
   const [newReason, setNewReason] = useState('');
   const [busy, setBusy] = useState('');
+  const [siteCfg, setSiteCfg] = useState(null);
+  const [gate, setGate] = useState('both');
+  const [retention, setRetention] = useState(14);
+  const [smtp, setSmtp] = useState({ host: '', port: 465, secure: true, user: '', pass: '', from: '', fromName: '' });
+  const [testTo, setTestTo] = useState('');
+  const [invites, setInvites] = useState(null);
+  const [invCount, setInvCount] = useState(3);
+  const [invUses, setInvUses] = useState(1);
+  const [invDays, setInvDays] = useState(30);
   const debounceRef = useRef(null);
 
   const loadOverview = useCallback(async () => {
@@ -141,6 +158,102 @@ export default function AdminPage({ token, me }) {
     },
     [token],
   );
+
+  const loadSite = useCallback(async () => {
+    try {
+      const [cfg, inv] = await Promise.all([api('/api/admin/site', { token }), api('/api/admin/invites', { token })]);
+      setSiteCfg(cfg);
+      setGate(cfg.registerGate || 'both');
+      setRetention(cfg.retentionDays ?? 14);
+      const s = cfg.smtp || {};
+      setSmtp({
+        host: s.host || '',
+        port: s.port || 465,
+        secure: s.secure === undefined ? true : !!s.secure,
+        user: s.user || '',
+        pass: '',
+        from: s.from || '',
+        fromName: s.fromName || '',
+      });
+      setInvites(inv.invites || []);
+    } catch (err) {
+      toast(err.message, 'error');
+      setSiteCfg(false);
+    }
+  }, [token]);
+
+  const saveSite = async (patch, okText) => {
+    setBusy('/api/admin/site');
+    try {
+      const out = await api('/api/admin/site', { token, method: 'PATCH', body: patch });
+      toast(okText, 'ok');
+      setGate(out.registerGate || gate);
+      setRetention(out.retentionDays ?? retention);
+      await loadSite();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const sendTestMail = async () => {
+    setBusy('/api/admin/site/test-mail');
+    try {
+      const out = await api('/api/admin/site/test-mail', { token, method: 'POST', body: { to: testTo.trim() || undefined } });
+      toast('测试邮件已发出，收件箱看看有没有', 'ok');
+      if (out && out.to) setTestTo(out.to);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const makeInvites = async () => {
+    setBusy('/api/admin/invites');
+    try {
+      const out = await api('/api/admin/invites', {
+        token,
+        method: 'POST',
+        body: { count: Number(invCount) || 1, maxUses: Number(invUses) || 1, expiresInDays: Number(invDays) || 0 },
+      });
+      toast('生成了 ' + (out.codes || []).length + ' 个邀请码', 'ok');
+      await loadSite();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const dropInvite = async (code) => {
+    setBusy('/api/admin/invites/' + code);
+    try {
+      await api('/api/admin/invites/' + encodeURIComponent(code), { token, method: 'DELETE' });
+      toast('已删除该邀请码', 'ok');
+      await loadSite();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const deleteAccount = async (a) => {
+    const ok = window.confirm('把 ' + (a.nickname || a.number) + ' #' + a.number + ' 彻底删掉？\n它的消息、会话、好友关系都会一起消失，删了不能恢复。');
+    if (!ok) return;
+    setBusy('/api/admin/accounts/' + a.number + '/delete');
+    try {
+      await api('/api/admin/accounts/' + a.number + '/delete', { token, method: 'POST' });
+      toast('账号已删除', 'ok');
+      await Promise.all([loadOverview(), loadAccounts(), loadBots()]);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setBusy('');
+    }
+  };
 
   const loadBans = useCallback(async () => {
     try {
@@ -243,6 +356,7 @@ export default function AdminPage({ token, me }) {
     if (id === 'pending') loadPending();
     if (id === 'logins') loadLogins(onlyFail);
     if (id === 'guard') loadBans();
+    if (id === 'site' && !siteCfg) loadSite();
   };
 
   const c = overview?.counts || {};
@@ -376,6 +490,262 @@ export default function AdminPage({ token, me }) {
                       }
                     >
                       {a.is_admin ? '取消管理' : '设管理员'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      disabled={busy === '/api/admin/accounts/' + a.number + '/delete' || a.id === me?.id}
+                      onClick={() => deleteAccount(a)}
+                    >
+                      <Icon name="trash" size={14} /> 删除
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {section === 'site' ? (
+        <section className="settings-card">
+          <div className="admin-card-head">
+            <div>
+              <h3>注册门禁</h3>
+              <p>新号进来要过哪一关。改完立刻生效，注册页会跟着变。</p>
+            </div>
+          </div>
+          <div className="admin-modes">
+            {GATES.map((g) => (
+              <button
+                type="button"
+                key={g.id}
+                className={'admin-mode' + (gate === g.id ? ' on' : '')}
+                disabled={busy === '/api/admin/site'}
+                onClick={() => saveSite({ registerGate: g.id }, '注册门禁已改为「' + g.label + '」')}
+              >
+                <b>{g.label}</b>
+                <span>{g.hint}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="admin-card-head admin-card-head-gap">
+            <div>
+              <h3>数据保留</h3>
+              <p>超过这个天数的消息会被自动清掉（连图片一起），给设备省空间。填 0 = 永久保留。</p>
+            </div>
+          </div>
+          <div className="admin-toolbar">
+            <label className="admin-search">
+              <Icon name="clock" size={15} />
+              <input
+                type="number"
+                min="0"
+                max="365"
+                value={retention}
+                onChange={(e) => setRetention(e.target.value)}
+                aria-label="数据保留天数"
+              />
+            </label>
+            <span className="admin-inline-hint">天（0 = 永久）</span>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={busy === '/api/admin/site'}
+              onClick={() => saveSite({ retentionDays: Number(retention) || 0 }, '保留天数已保存')}
+            >
+              保存
+            </button>
+          </div>
+
+          <div className="admin-card-head admin-card-head-gap">
+            <div>
+              <h3>发信服务（SMTP）</h3>
+              <p>配好之后注册能走「邮箱验证码」，也能给用户发通知。没配就只认邀请码。</p>
+            </div>
+            <span className={'admin-tag ' + (siteCfg && siteCfg.smtpReady ? 'ok' : 'danger')}>
+              {siteCfg && siteCfg.smtpReady ? '已就绪' : '未配置'}
+            </span>
+          </div>
+          <div className="admin-form">
+            <label className="field">
+              <span className="field-label">服务器地址</span>
+              <input
+                className="input"
+                value={smtp.host}
+                placeholder="smtp.example.com"
+                onChange={(e) => setSmtp({ ...smtp, host: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">端口</span>
+              <input
+                className="input"
+                type="number"
+                value={smtp.port}
+                placeholder="465"
+                onChange={(e) => setSmtp({ ...smtp, port: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">加密方式</span>
+              <select
+                className="input"
+                value={smtp.secure ? 'ssl' : 'starttls'}
+                onChange={(e) => setSmtp({ ...smtp, secure: e.target.value === 'ssl' })}
+              >
+                <option value="ssl">SSL 直连（一般 465）</option>
+                <option value="starttls">STARTTLS（一般 587）</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">登录账号</span>
+              <input
+                className="input"
+                value={smtp.user}
+                placeholder="通常就是邮箱地址"
+                onChange={(e) => setSmtp({ ...smtp, user: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">密码 / 授权码</span>
+              <input
+                className="input"
+                type="password"
+                value={smtp.pass}
+                placeholder={siteCfg && siteCfg.smtp && siteCfg.smtp.hasPass ? '已保存，留空不改' : '邮箱的授权码'}
+                onChange={(e) => setSmtp({ ...smtp, pass: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">发件人地址</span>
+              <input
+                className="input"
+                value={smtp.from}
+                placeholder="不填就用登录账号"
+                onChange={(e) => setSmtp({ ...smtp, from: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">发件人名字</span>
+              <input
+                className="input"
+                value={smtp.fromName}
+                placeholder="Everony"
+                onChange={(e) => setSmtp({ ...smtp, fromName: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">试发到</span>
+              <input
+                className="input"
+                value={testTo}
+                placeholder="留空发到自己账号邮箱"
+                onChange={(e) => setTestTo(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="admin-toolbar">
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={busy === '/api/admin/site'}
+              onClick={() =>
+                saveSite(
+                  {
+                    smtpHost: smtp.host.trim(),
+                    smtpPort: Number(smtp.port) || 465,
+                    smtpSecure: !!smtp.secure,
+                    smtpUser: smtp.user.trim(),
+                    smtpPass: smtp.pass,
+                    smtpFrom: smtp.from.trim(),
+                    smtpFromName: smtp.fromName.trim(),
+                  },
+                  '发信设置已保存',
+                )
+              }
+            >
+              保存发信设置
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={busy === '/api/admin/site/test-mail'}
+              onClick={sendTestMail}
+            >
+              <Icon name="mail" size={14} /> 试发一封
+            </button>
+          </div>
+
+          <div className="admin-card-head admin-card-head-gap">
+            <div>
+              <h3>邀请码</h3>
+              <p>注册时填它就能过门禁。每个码能用几次、多久过期都由你定。</p>
+            </div>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadSite()}>
+              <Icon name="refresh" size={15} /> 刷新
+            </button>
+          </div>
+          <div className="admin-toolbar">
+            <label className="admin-search admin-search-narrow">
+              <Icon name="hash" size={15} />
+              <input type="number" min="1" max="50" value={invCount} onChange={(e) => setInvCount(e.target.value)} aria-label="生成个数" />
+            </label>
+            <label className="admin-search admin-search-narrow">
+              <Icon name="users" size={15} />
+              <input type="number" min="1" max="1000" value={invUses} onChange={(e) => setInvUses(e.target.value)} aria-label="每个可用次数" />
+            </label>
+            <label className="admin-search admin-search-narrow">
+              <Icon name="clock" size={15} />
+              <input type="number" min="0" max="3650" value={invDays} onChange={(e) => setInvDays(e.target.value)} aria-label="有效天数" />
+            </label>
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy === '/api/admin/invites'} onClick={makeInvites}>
+              <Icon name="plus" size={14} /> 生成
+            </button>
+          </div>
+          <span className="admin-inline-hint">依次是：生成几个 / 每个能用几次 / 多少天后过期（0 = 不过期）</span>
+          {invites === null ? (
+            <SkeletonList rows={3} />
+          ) : invites.length === 0 ? (
+            <Empty compact icon="star" title="还没有邀请码" sub="上面填好数量点「生成」，把码发给要拉进来的人。" />
+          ) : (
+            <div className="admin-list">
+              {invites.map((it) => (
+                <div className="admin-row" key={it.code}>
+                  <div className="admin-row-main">
+                    <b>
+                      {it.code}
+                      {it.left > 0 ? <em className="admin-tag ok">可用 {it.left}</em> : <em className="admin-tag danger">已用完</em>}
+                      {it.expires_at && it.expires_at < Date.now() ? <em className="admin-tag danger">已过期</em> : null}
+                    </b>
+                    <span>
+                      已用 {it.used}/{it.max_uses}
+                      {it.expires_at ? ' · ' + new Date(it.expires_at).toLocaleDateString() + ' 到期' : ' · 不过期'}
+                      {it.by_nickname ? ' · ' + it.by_nickname : ''}
+                      {it.note ? ' · ' + it.note : ''}
+                    </span>
+                  </div>
+                  <div className="admin-row-actions">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(it.code).then(
+                          () => toast('邀请码已复制', 'ok'),
+                          () => toast('复制失败，长按选中手动复制', 'error'),
+                        );
+                      }}
+                    >
+                      <Icon name="copy" size={14} /> 复制
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      disabled={busy === '/api/admin/invites/' + it.code}
+                      onClick={() => dropInvite(it.code)}
+                    >
+                      删除
                     </button>
                   </div>
                 </div>

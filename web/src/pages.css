@@ -4171,3 +4171,62 @@ body,
   background: rgba(52, 211, 153, 0.14);
   border: 1px solid rgba(52, 211, 153, 0.3);
 }
+
+/* ---------------- 加好友：搜索联想结果 + 二维码名片 ---------------- */
+.af-searching {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 2px; font-size: 0.82rem; color: var(--text-2, #a9b2c6);
+}
+.af-results {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 268px; overflow-y: auto;
+  margin: 4px 0 2px; padding: 2px;
+}
+.af-result {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev, rgba(255,255,255,0.03));
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+.af-result:hover { border-color: var(--brand, #5b8cff); background: var(--bg-hover, rgba(255,255,255,0.06)); }
+.af-result-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.af-result-main b {
+  font-size: 0.9rem; color: var(--text-1, #eef2ff); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.af-result-main span {
+  font-size: 0.74rem; color: var(--text-2, #a9b2c6);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.af-result-tag {
+  flex: none; font-size: 0.72rem; padding: 3px 9px; border-radius: 999px;
+  color: var(--text-2, #a9b2c6); border: 1px solid var(--line); background: transparent;
+}
+.af-qr-ph {
+  width: 132px; height: 132px; flex: none; border-radius: 14px;
+  border: 1px dashed var(--line); display: flex; align-items: center; justify-content: center;
+}
+@media (max-width: 720px) {
+  .af-results { max-height: 220px; }
+  .af-qr { flex-direction: column; align-items: center; text-align: center; }
+  .af-qr-main { align-items: center; }
+}
+
+/* ---------------- 管理台：站点设置表单 ---------------- */
+.admin-form {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin: 4px 0 12px;
+}
+.admin-form .field { margin: 0; }
+.admin-inline-hint {
+  display: block; font-size: 0.74rem; color: var(--text-2, #a9b2c6);
+  margin: 2px 0 10px; line-height: 1.5;
+}
+.admin-search-narrow { flex: 0 0 132px; min-width: 132px; }
+.admin-toolbar .admin-search-narrow input { text-align: left; }
+@media (max-width: 720px) {
+  .admin-form { grid-template-columns: 1fr; }
+  .admin-search-narrow { flex: 1 1 96px; min-width: 96px; }
+}

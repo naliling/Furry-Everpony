@@ -38,6 +38,12 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
   /* 注册成功但要等审核时的提示（此时还没有 token，不能直接进主界面） */
   const [notice, setNotice] = useState('');
   const [accountList, setAccountList] = useState(() => loadAccounts());
+  /* 站点门禁：注册要不要邀请码 / 邮箱验证码，由站长在后台配 */
+  const [site, setSite] = useState(null);
+  const [invite, setInvite] = useState('');
+  const [emailCode, setEmailCode] = useState('');
+  const [codeBusy, setCodeBusy] = useState(false);
+  const [codeSent, setCodeSent] = useState('');
   /* 注册验证码：后端生成 SVG，前端只负责显示、刷新与提交 */
   const [captcha, setCaptcha] = useState(null);
   const [captchaCode, setCaptchaCode] = useState('');
@@ -59,8 +65,30 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
 
   useEffect(() => {
     loadCaptcha();
+    api('/api/site').then(setSite).catch(() => setSite(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const gate = site && site.registerGate ? site.registerGate : 'both';
+  const needInvite = gate === 'invite' || gate === 'both';
+  const needEmailCode = gate === 'email' || gate === 'both';
+  const canEmailCode = !!(site && site.smtpReady);
+
+  const sendEmailCode = async () => {
+    const mail = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) { setError('先填一个能收信的邮箱'); return; }
+    setCodeBusy(true);
+    setError('');
+    try {
+      await api('/api/email-code', { method: 'POST', body: { email: mail } });
+      setCodeSent(mail);
+      toast('验证码已发出，10 分钟内有效', 'success');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCodeBusy(false);
+    }
+  };
 
   useEffect(() => {
     setError('');
@@ -103,7 +131,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
     if (mode === 'login') {
       const id = identifier.trim();
       if (!id) {
-        setError('请输入邮箱');
+        setError('请输入号码或邮箱');
         return;
       }
       if (!password) {
@@ -152,19 +180,25 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
       setError('请输入图片里的验证码');
       return;
     }
+    if (needInvite && !invite.trim() && !(needEmailCode && canEmailCode && emailCode.trim())) {
+      setError(canEmailCode ? '填邮箱验证码，或者找站主要一个邀请码' : '这个站要邀请码才能注册，找站主要一个');
+      return;
+    }
     setBusy(true);
     try {
       const data = await api('/api/register', {
         method: 'POST',
-        body: { email: mail, number: n, nickname: nickname.trim(), password, captchaId: captcha.id, captcha: captchaCode.trim() },
+        body: {
+          email: mail,
+          number: n,
+          nickname: nickname.trim(),
+          password,
+          captchaId: captcha.id,
+          captcha: captchaCode.trim(),
+          ...(invite.trim() ? { invite: invite.trim().toUpperCase() } : {}),
+          ...(emailCode.trim() ? { emailCode: emailCode.trim() } : {}),
+        },
       });
-      if (data.pending) {
-        setNotice(data.message || '注册成功，等站长审核通过后就能登录');
-        setMode('login');
-        setIdentifier(n);
-        loadCaptcha();
-        return;
-      }
       rememberAccount(data.account, data.token);
       onAuthed(data);
     } catch (err) {
@@ -258,26 +292,31 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
               <span className="auth-tab-glider" data-mode={mode} />
             </div>
             <p className="auth-card-sub">
-              {mode === 'login' ? '欢迎回来，用注册时的邮箱继续。' : '邮箱注册，再挑一个 8–11 位号码当公开身份。'}
+              {mode === 'login'
+                ? '填号码或邮箱进来。号码可以填你常用的号，Bot 就能在这里认出你。'
+                : site === false
+                  ? '这个站暂时读不到注册配置，先找站主要个邀请码试试。'
+                  : '填邮箱和号码，再挑一个 8–11 位号码当公开身份。'} 
             </p>
           </header>
 
           <form className="auth-form" onSubmit={submit}>
             {mode === 'login' ? (
               <label className="field">
-                <span className="field-label">邮箱</span>
+                <span className="field-label">号码 / 邮箱</span>
                 <div className="input-wrap">
-                  <Icon name="mail" size={17} className="input-icon" />
+                  <Icon name="hash" size={17} className="input-icon" />
                   <input
                     ref={emailRef}
                     className="input"
                     autoComplete="username"
                     spellCheck={false}
-                    placeholder="注册时填的邮箱（老账号也可以直接填号码）"
+                    placeholder="填你的号码（或注册邮箱）"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
                   />
                 </div>
+                <span className="field-hint">号码可以填你常用的号，Bot 就能在这里认出你。</span>
               </label>
             ) : (
               <label className="field">
@@ -382,6 +421,50 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
                     )}
                   </button>
                 </div>
+              </label>
+            ) : null}
+
+            {mode === 'register' && needEmailCode && canEmailCode ? (
+              <label className="field">
+                <span className="field-label">邮箱验证码 <span className="field-hint">发到这个邮箱，10 分钟内有效</span></span>
+                <div className="captcha-row">
+                  <div className="input-wrap">
+                    <Icon name="mail" size={17} className="input-icon" />
+                    <input
+                      className="input"
+                      autoComplete="off"
+                      spellCheck={false}
+                      maxLength={6}
+                      inputMode="numeric"
+                      placeholder="6 位数字"
+                      value={emailCode}
+                      onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    />
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={sendEmailCode} disabled={codeBusy}>
+                    {codeBusy ? <Spinner size={14} /> : <Icon name="send" size={14} />} {codeSent ? '重新发' : '发验证码'}
+                  </button>
+                </div>
+                {codeSent ? <span className="field-hint">已经发到 {codeSent}，去邮箱里翻一下（也在垃圾箱看看）。</span> : null}
+              </label>
+            ) : null}
+
+            {mode === 'register' && needInvite ? (
+              <label className="field">
+                <span className="field-label">邀请码 <span className="field-hint">找站主要一个，或者用朋友的</span></span>
+                <div className="input-wrap">
+                  <Icon name="star" size={17} className="input-icon" />
+                  <input
+                    className="input"
+                    autoComplete="off"
+                    spellCheck={false}
+                    maxLength={16}
+                    placeholder="8 位字母数字"
+                    value={invite}
+                    onChange={(e) => setInvite(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, ''))}
+                  />
+                </div>
+                {needEmailCode && canEmailCode ? <span className="field-hint">有邮箱验证码的话，这一栏可以空着。</span> : null}
               </label>
             ) : null}
 

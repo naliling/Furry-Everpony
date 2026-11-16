@@ -27,7 +27,8 @@ const NOTICE_META = {
 export default function Shell({ token, me, accounts, theme, onTheme, font, onFont, onSwitchAccount, onAddAccount, onLogout, onBotSession }) {
   const isMobile = useIsMobile();
   const [meLive, setMeLive] = useState(me);
-  const [tab, setTab] = useState('plaza');
+  /* Bot 身份登录时只有「消息」和「我的」两件事可做，开局直接落到消息 */
+  const [tab, setTab] = useState(me?.type === 'bot' ? 'chat' : 'plaza');
   const [discoverView, setDiscoverView] = useState('plaza');
   const [convs, setConvs] = useState(null);
   const [notifs, setNotifs] = useState({ count: 0, items: [] });
@@ -36,6 +37,8 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
   const [favorites, setFavorites] = useState(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountMenu, setAccountMenu] = useState(null);
+  /* 退出登录要问一句：以前点一下就退，回来还得重登，太容易误触 */
+  const [logoutAsk, setLogoutAsk] = useState(false);
   const [openConv, setOpenConv] = useState(null);
   const [newChatSignal, setNewChatSignal] = useState(0);
   const [busyItem, setBusyItem] = useState(null);
@@ -269,10 +272,11 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
   };
 
   /* 管理入口只给管理员看，普通用户不会知道它存在 */
-  const navItems = useMemo(
-    () => (meLive?.is_admin ? [...NAV, { id: 'admin', icon: 'shield', label: '管理' }] : NAV),
-    [meLive?.is_admin],
-  );
+  const isBotAccount = meLive?.type === 'bot';
+  const navItems = useMemo(() => {
+    const base = isBotAccount ? NAV.filter((n) => n.id === 'chat' || n.id === 'me') : NAV;
+    return meLive?.is_admin ? [...base, { id: 'admin', icon: 'shield', label: '管理' }] : base;
+  }, [meLive?.is_admin, isBotAccount]);
 
   const switchAccount = async (acc) => {
     try {
@@ -314,6 +318,7 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
           ))}
         </nav>
         <div className="rail-foot">
+          {isBotAccount ? null : (
           <button
             type="button"
             className={'rail-btn rail-bot' + (tab === 'plaza' && discoverView === 'mine' ? ' on' : '')}
@@ -323,10 +328,13 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
           >
             <Icon name="bot" size={20} />
           </button>
+          )}
+          {isBotAccount ? null : (
           <button type="button" className="rail-btn rail-bell" title="通知中心" aria-label="通知中心" onClick={openNotifications}>
             <Icon name="bell" size={20} />
             {notifs.count > 0 ? <span className="rail-badge" >{notifs.count > 99 ? '99+' : notifs.count}</span> : null}
           </button>
+          )}
           <button
             type="button"
             className="rail-avatar"
@@ -338,7 +346,7 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
                 { label: '设置', icon: 'gear', onClick: () => setTab('me') },
                 { label: '切换账号', icon: 'refresh', onClick: () => setAccountOpen(true) },
                 { divider: true },
-                { label: '退出登录', icon: 'logout', danger: true, onClick: () => onLogout?.() },
+                { label: '退出登录', icon: 'logout', danger: true, onClick: () => setLogoutAsk(true) },
               ] });
             }}
           >
@@ -531,10 +539,21 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
           <button type="button" className="btn btn-ghost btn-block" onClick={() => { setAccountOpen(false); onAddAccount?.(); }}>
             <Icon name="plus" size={17} /> 添加账号
           </button>
-          <button type="button" className="btn btn-danger-ghost btn-block" onClick={() => onLogout?.()}>
+          <button type="button" className="btn btn-danger-ghost btn-block" onClick={() => setLogoutAsk(true)}>
             <Icon name="logout" size={17} /> 退出当前账号
           </button>
         </Drawer>
+      ) : null}
+
+      {logoutAsk ? (
+        <Confirm
+          title="退出登录？"
+          message="退出后要重新输入号码和密码才能进来，聊天记录不会丢。"
+          danger
+          confirmText="退出登录"
+          onConfirm={() => { setLogoutAsk(false); onLogout?.(); }}
+          onClose={() => setLogoutAsk(false)}
+        />
       ) : null}
     </div>
   );

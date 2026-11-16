@@ -5,12 +5,6 @@ import {
   uploadFile,
   getDraft,
   setDraft,
-  EMOJI_GROUPS,
-  ALL_EMOJIS,
-  RECENT_EMOJI_KEY,
-  FAV_EMOJI_KEY,
-  pushRecentEmoji,
-  toggleFavEmoji,
   storageGet,
   storageSet,
   SEND_MODE_KEY,
@@ -18,8 +12,6 @@ import {
 
 export default function Composer({ token, conversationId, isGroup, group, members, me, reply, onCancelReply, onSend, onTyping, disabledReason }) {
   const [text, setText] = useState('');
-  const [emojiOpen, setEmojiOpen] = useState(false);
-  const [emojiTab, setEmojiTab] = useState('recent');
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -29,11 +21,8 @@ export default function Composer({ token, conversationId, isGroup, group, member
   const [dragging, setDragging] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendMode, setSendMode] = useState(() => storageGet(SEND_MODE_KEY, 'enter'));
-  const [recent, setRecent] = useState(() => storageGet(RECENT_EMOJI_KEY, []));
-  const [favs, setFavs] = useState(() => storageGet(FAV_EMOJI_KEY, []));
   const textRef = useRef(null);
   const imageRef = useRef(null);
-  const fileRef = useRef(null);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const recordTimer = useRef(null);
@@ -44,7 +33,6 @@ export default function Composer({ token, conversationId, isGroup, group, member
 
   useEffect(() => {
     setText(getDraft(conversationId) || '');
-    setEmojiOpen(false);
     setMentionOpen(false);
     setReplyBox(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -67,16 +55,6 @@ export default function Composer({ token, conversationId, isGroup, group, member
       setReplyBox(false);
     }
   }, [reply]);
-
-  useEffect(() => {
-    if (!emojiOpen) return undefined;
-    const close = (e) => {
-      if (e.target.closest('.emoji-panel') || e.target.closest('[data-emoji-toggle]')) return;
-      setEmojiOpen(false);
-    };
-    document.addEventListener('pointerdown', close);
-    return () => document.removeEventListener('pointerdown', close);
-  }, [emojiOpen]);
 
   const mentionables = useMemo(() => {
     if (!isGroup) return [];
@@ -105,16 +83,6 @@ export default function Composer({ token, conversationId, isGroup, group, member
       el.focus();
       el.setSelectionRange(pos, pos);
     });
-  };
-
-  const pickEmoji = (emoji) => {
-    insertAtCaret(emoji);
-    pushRecentEmoji(emoji);
-    setRecent(storageGet(RECENT_EMOJI_KEY, []));
-  };
-
-  const favEmoji = (emoji) => {
-    setFavs(toggleFavEmoji(emoji));
   };
 
   const onChangeText = (e) => {
@@ -168,7 +136,6 @@ export default function Composer({ token, conversationId, isGroup, group, member
       await onSend({ body: value, kind: 'text', mentionAll, ...(reply?.id ? { replyTo: reply.id } : {}) });
       setText('');
       setDraft(conversationId, '');
-      setEmojiOpen(false);
       onCancelReply?.();
       requestAnimationFrame(() => {
         if (textRef.current) textRef.current.style.height = 'auto';
@@ -212,20 +179,6 @@ export default function Composer({ token, conversationId, isGroup, group, member
     }
   };
 
-  const sendFile = async (file) => {
-    if (!file || sending || disabledReason) return;
-    setSending(true);
-    try {
-      const up = await uploadFile(file, token);
-      await onSend({ body: up.url, kind: 'file', meta: { name: up.name, size: up.size }, ...(reply?.id ? { replyTo: reply.id } : {}) });
-      onCancelReply?.();
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      setSending(false);
-    }
-  };
-
   const handlePaste = (e) => {
     const items = Array.from(e.clipboardData?.items || []);
     const img = items.find((it) => it.type.startsWith('image/'));
@@ -241,8 +194,9 @@ export default function Composer({ token, conversationId, isGroup, group, member
     setDragging(false);
     const file = e.dataTransfer?.files?.[0];
     if (!file) return;
+    /* 站里不传文件，只认图片 */
     if (file.type.startsWith('image/')) sendImage(file);
-    else sendFile(file);
+    else toast('这里只收图片，不传其他文件', 'error');
   };
 
   const startRecord = async () => {
@@ -308,15 +262,6 @@ export default function Composer({ token, conversationId, isGroup, group, member
     if (rec && rec.state !== 'inactive') rec.stop();
   };
 
-  const emojiList = () => {
-    if (emojiTab === 'recent') {
-      const list = recent.length ? recent : ALL_EMOJIS.slice(0, 32);
-      return [{ id: 'recent', name: '最近', list }];
-    }
-    if (emojiTab === 'fav') return [{ id: 'fav', name: '收藏', list: favs.length ? favs : ALL_EMOJIS.slice(0, 16) }];
-    return EMOJI_GROUPS.filter((g) => g.id === emojiTab);
-  };
-
   const mentionLeft = 4000 - text.length;
 
   return (
@@ -326,7 +271,7 @@ export default function Composer({ token, conversationId, isGroup, group, member
       onDragLeave={() => setDragging(false)}
       onDrop={handleDrop}
     >
-      {dragging ? <div className="composer-drop"><Icon name="image" size={24} /> 松手发送文件 / 图片</div> : null}
+      {dragging ? <div className="composer-drop"><Icon name="image" size={24} /> 松手发送图片</div> : null}
 
       {disabledReason ? (
         <div className="composer-blocked"><Icon name="mute" size={15} /> {disabledReason}</div>
@@ -400,14 +345,8 @@ export default function Composer({ token, conversationId, isGroup, group, member
 
       <div className="composer-bar">
         <div className="composer-tools">
-          <button type="button" className="icon-btn" data-emoji-toggle onClick={() => setEmojiOpen((v) => !v)} title="表情" aria-label="表情">
-            <Icon name="emoji" size={19} />
-          </button>
           <button type="button" className="icon-btn" onClick={() => imageRef.current?.click()} title="发送图片" aria-label="发送图片">
             <Icon name="image" size={19} />
-          </button>
-          <button type="button" className="icon-btn" onClick={() => fileRef.current?.click()} title="发送文件" aria-label="发送文件">
-            <Icon name="file" size={19} />
           </button>
           <button type="button" className={'icon-btn' + (recording ? ' on' : '')} onClick={() => (recording ? stopRecord() : startRecord())} title="语音" aria-label="语音">
             <Icon name="mic" size={19} />
@@ -418,7 +357,6 @@ export default function Composer({ token, conversationId, isGroup, group, member
             </button>
           ) : null}
           <input ref={imageRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) sendImage(f); }} />
-          <input ref={fileRef} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) sendFile(f); }} />
         </div>
 
         <div className="composer-actions">
@@ -428,39 +366,6 @@ export default function Composer({ token, conversationId, isGroup, group, member
       </div>
       </div>
 
-      {emojiOpen ? (
-        <div className="emoji-panel">
-          <div className="emoji-tabs">
-            <button type="button" className={emojiTab === 'recent' ? 'on' : ''} onClick={() => setEmojiTab('recent')}><Icon name="clock" size={16} /></button>
-            <button type="button" className={emojiTab === 'fav' ? 'on' : ''} onClick={() => setEmojiTab('fav')}><Icon name="star" size={16} /></button>
-            {EMOJI_GROUPS.map((g) => (
-              <button type="button" key={g.id} className={emojiTab === g.id ? 'on' : ''} onClick={() => setEmojiTab(g.id)} title={g.name}>{g.icon || g.name.slice(0, 2)}</button>
-            ))}
-          </div>
-          {emojiTab === 'fav' && favs.length === 0 ? (
-            <div className="emoji-empty">在表情上右键可以收藏</div>
-          ) : null}
-          {emojiList().map((group) => (
-            <div key={group.id} className="emoji-group">
-              <div className="emoji-group-head">{group.name}</div>
-              <div className="emoji-grid">
-                {group.list.map((emoji, i) => (
-                  <button
-                    type="button"
-                    key={emoji + i}
-                    className="emoji-cell"
-                    onClick={() => pickEmoji(emoji)}
-                    onContextMenu={(e) => { e.preventDefault(); favEmoji(emoji); }}
-                    title="点击插入，右键收藏"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }

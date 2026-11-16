@@ -34,7 +34,8 @@
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  background-attachment: local;
+  /* scroll = 背景钉在消息框上，消息再多也不跟着走（local 会随内容滚，看着像背景在飘） */
+  background-attachment: scroll;
   position: relative;
 }
 .msg-list.has-chat-bg::before {
