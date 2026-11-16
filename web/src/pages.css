@@ -3771,7 +3771,7 @@ body,
 
 .admin-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
   gap: 10px;
 }
 .admin-stat {
@@ -3810,7 +3810,34 @@ body,
 }
 
 .admin-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.admin-search { flex: 1 1 240px; min-width: 0; }
+.admin-search {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  background: var(--bg-input, rgba(255, 255, 255, 0.05));
+  color: var(--text-3);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.admin-search:focus-within {
+  border-color: var(--brand, #22d3ee);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand, #22d3ee) 16%, transparent);
+}
+.admin-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 13px;
+  outline: none;
+}
 .admin-filters { display: flex; gap: 6px; flex-wrap: wrap; }
 .admin-filters button {
   padding: 5px 12px;
@@ -3986,4 +4013,161 @@ body,
   .admin-entry-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+
+/* 注册待审核提示（v0.10.24） */
+.form-ok {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #7ff0c4;
+  background: rgba(52, 211, 153, 0.1);
+  border: 1px solid rgba(52, 211, 153, 0.34);
+}
+
+/* 管理台新增三段：审核 / 登录记录 / 防护（v0.10.24） */
+.admin-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.admin-card-head h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  color: var(--text-1);
+}
+.admin-card-head p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+.admin-card-head-gap {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.admin-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.admin-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  text-align: left;
+  cursor: pointer;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  transition: border-color 0.16s, background 0.16s;
+}
+.admin-mode:hover {
+  border-color: var(--line-strong);
+}
+.admin-mode.on {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.1);
+}
+.admin-mode b {
+  font-size: 13.5px;
+  color: var(--text-1);
+}
+.admin-mode span {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.45;
+}
+@media (max-width: 640px) {
+  .admin-modes {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* 登录设备（v0.10.24） */
+.settings-devices {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.settings-devices-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.settings-devices-head b {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13.5px;
+  color: var(--text-1);
+}
+.settings-devices-sub {
+  margin: 6px 0 10px;
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+.settings-devices-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-3);
+  padding: 8px 0;
+}
+.settings-devices-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+}
+.settings-device-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.settings-device-main b {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-1);
+}
+.settings-device-main span {
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-device-now {
+  font-style: normal;
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: #7ff0c4;
+  background: rgba(52, 211, 153, 0.14);
+  border: 1px solid rgba(52, 211, 153, 0.3);
 }

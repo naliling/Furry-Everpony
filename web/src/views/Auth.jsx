@@ -35,6 +35,8 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  /* 注册成功但要等审核时的提示（此时还没有 token，不能直接进主界面） */
+  const [notice, setNotice] = useState('');
   const [accountList, setAccountList] = useState(() => loadAccounts());
   /* 注册验证码：后端生成 SVG，前端只负责显示、刷新与提交 */
   const [captcha, setCaptcha] = useState(null);
@@ -62,6 +64,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
 
   useEffect(() => {
     setError('');
+    setNotice('');
   }, [mode]);
 
   /* 注册模式下自动检查号码可用性 */
@@ -155,6 +158,13 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
         method: 'POST',
         body: { email: mail, number: n, nickname: nickname.trim(), password, captchaId: captcha.id, captcha: captchaCode.trim() },
       });
+      if (data.pending) {
+        setNotice(data.message || '注册成功，等站长审核通过后就能登录');
+        setMode('login');
+        setIdentifier(n);
+        loadCaptcha();
+        return;
+      }
       rememberAccount(data.account, data.token);
       onAuthed(data);
     } catch (err) {
@@ -375,6 +385,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
               </label>
             ) : null}
 
+            {notice ? <p className="form-ok" role="status">{notice}</p> : null}
             {error ? <p className="form-error" role="alert">{error}</p> : null}
 
             <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={busy}>

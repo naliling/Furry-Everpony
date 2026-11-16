@@ -15,6 +15,10 @@ node_modules/
 !.tools/test-p1.mjs
 !.tools/test-admin.mjs
 !.tools/test-captcha.mjs
+!.tools/test-guard.mjs
+!.tools/seed-mode.mjs
+!.tools/run-tests.sh
+!.tools/kill-7799.ps1
 
 # 构建产物
 dist/

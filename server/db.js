@@ -367,5 +367,59 @@ function migrate(db) {
   if (!hasColumn(db, 'accounts', 'ban_reason')) {
     db.exec("ALTER TABLE accounts ADD COLUMN ban_reason TEXT NOT NULL DEFAULT ''");
   }
+
+  /* ---------- v0.10.24：注册审核 + 登录 IP/设备 + 防攻击 ---------- */
+  /* 注册后是否已通过审核：1 = 正常可用，0 = 等站长放行（老库默认 1，不影响现有账号） */
+  if (!hasColumn(db, 'accounts', 'approved')) {
+    db.exec('ALTER TABLE accounts ADD COLUMN approved INTEGER NOT NULL DEFAULT 1');
+  }
+  /* 会话记下登录来源，管理台能看到「谁在什么设备上登录」 */
+  if (!hasColumn(db, 'sessions', 'ip')) {
+    db.exec("ALTER TABLE sessions ADD COLUMN ip TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, 'sessions', 'ua')) {
+    db.exec("ALTER TABLE sessions ADD COLUMN ua TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, 'sessions', 'device')) {
+    db.exec("ALTER TABLE sessions ADD COLUMN device TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, 'accounts', 'last_login_ip')) {
+    db.exec("ALTER TABLE accounts ADD COLUMN last_login_ip TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, 'accounts', 'last_login_at')) {
+    db.exec('ALTER TABLE accounts ADD COLUMN last_login_at INTEGER NOT NULL DEFAULT 0');
+  }
+
+  db.exec(`
+    /* 站点级开关：registerMode = open / approval / closed */
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    /* 手动封禁的 IP（爬虫、刷号、爆破） */
+    CREATE TABLE IF NOT EXISTS ip_bans (
+      ip         TEXT PRIMARY KEY,
+      reason     TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+
+    /* 登录流水：成功的和失败的都记，用来识别撞库与异常设备 */
+    CREATE TABLE IF NOT EXISTS login_logs (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER,
+      number     TEXT NOT NULL DEFAULT '',
+      ip         TEXT NOT NULL DEFAULT '',
+      ua         TEXT NOT NULL DEFAULT '',
+      device     TEXT NOT NULL DEFAULT '',
+      ok         INTEGER NOT NULL DEFAULT 0,
+      reason     TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_login_logs_created ON login_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_login_logs_ip ON login_logs(ip);
+    CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);
+  `);
 }
 

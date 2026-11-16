@@ -15,6 +15,9 @@ const FILTERS = [
 
 const SECTIONS = [
   { id: 'accounts', label: '账号', icon: 'friend' },
+  { id: 'pending', label: '审核', icon: 'check' },
+  { id: 'logins', label: '登录记录', icon: 'key' },
+  { id: 'guard', label: '防护', icon: 'shield' },
   { id: 'bots', label: 'Bot', icon: 'bot' },
   { id: 'messages', label: '消息', icon: 'chat' },
 ];
@@ -25,6 +28,17 @@ function fmtBytes(n) {
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
   if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
   return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+}
+
+const MODES = [
+  { id: 'open', label: '开放注册', hint: '谁都能注册，注册完就能用' },
+  { id: 'approval', label: '需要审核', hint: '新号注册后要你在「审核」里放行' },
+  { id: 'closed', label: '关闭注册', hint: '只保留已有账号，不再接受新注册' },
+];
+
+function modeLabel(id) {
+  const m = MODES.find((x) => x.id === id);
+  return m ? m.label : id;
 }
 
 function fmtUptime(sec) {
@@ -45,6 +59,13 @@ export default function AdminPage({ token, me }) {
   const [accounts, setAccounts] = useState(null);
   const [bots, setBots] = useState(null);
   const [messages, setMessages] = useState(null);
+  const [pendingList, setPendingList] = useState(null);
+  const [logins, setLogins] = useState(null);
+  const [onlyFail, setOnlyFail] = useState(false);
+  const [ipBans, setIpBans] = useState(null);
+  const [regMode, setRegMode] = useState('approval');
+  const [newIp, setNewIp] = useState('');
+  const [newReason, setNewReason] = useState('');
   const [busy, setBusy] = useState('');
   const debounceRef = useRef(null);
 
@@ -96,6 +117,45 @@ export default function AdminPage({ token, me }) {
     }
   }, [token]);
 
+  const loadPending = useCallback(async () => {
+    try {
+      const data = await api('/api/admin/pending', { token });
+      setPendingList(data.pending || []);
+    } catch (err) {
+      toast(err.message, 'error');
+      setPendingList([]);
+    }
+  }, [token]);
+
+  const loadLogins = useCallback(
+    async (failsOnly) => {
+      const params = new URLSearchParams({ limit: '120' });
+      if (failsOnly) params.set('only', 'fail');
+      try {
+        const data = await api('/api/admin/logins?' + params.toString(), { token });
+        setLogins(data.logins || []);
+      } catch (err) {
+        toast(err.message, 'error');
+        setLogins([]);
+      }
+    },
+    [token],
+  );
+
+  const loadBans = useCallback(async () => {
+    try {
+      const [bans, cfg] = await Promise.all([
+        api('/api/admin/ip-bans', { token }),
+        api('/api/admin/settings', { token }),
+      ]);
+      setIpBans(bans.bans || []);
+      if (cfg.registerMode) setRegMode(cfg.registerMode);
+    } catch (err) {
+      toast(err.message, 'error');
+      setIpBans([]);
+    }
+  }, [token]);
+
   useEffect(() => {
     loadOverview();
     loadAccounts('', 'all');
@@ -108,18 +168,48 @@ export default function AdminPage({ token, me }) {
     if (section === 'messages') await loadMessages();
   };
 
-  const post = async (path, body, okText) => {
+  const send = async (path, method, body, okText) => {
     setBusy(path);
     try {
-      await api(path, { token, method: 'POST', body });
+      await api(path, { token, method, body });
       toast(okText, 'ok');
-      await refreshAll();
+      await loadOverview();
+      if (section === 'pending') await loadPending();
+      if (section === 'logins') await loadLogins(onlyFail);
+      if (section === 'guard') await loadBans();
+      if (section === 'accounts') await loadAccounts();
+      if (section === 'bots') await loadBots();
     } catch (err) {
       toast(err.message, 'error');
     } finally {
       setBusy('');
     }
   };
+
+  const post = (path, body, okText) => send(path, 'POST', body, okText);
+
+  const approve = async (number, approveIt) => {
+    if (!approveIt && !window.confirm('拒绝会把这个账号连同它的会话一起删掉，确定？')) return;
+    await send('/api/admin/accounts/' + number + '/approve', 'POST', { approve: approveIt }, approveIt ? '已通过' : '已拒绝并删除');
+  };
+
+  const setMode = async (mode) => {
+    setRegMode(mode);
+    await send('/api/admin/settings', 'PATCH', { registerMode: mode }, '注册模式已改');
+  };
+
+  const banIp = async () => {
+    const ip = (newIp || '').trim();
+    if (!ip) {
+      toast('先填 IP', 'error');
+      return;
+    }
+    await send('/api/admin/ip-bans', 'POST', { ip, reason: (newReason || '').trim() }, '已封禁该 IP');
+    setNewIp('');
+    setNewReason('');
+  };
+
+  const unbanIp = (ip) => send('/api/admin/ip-bans/' + encodeURIComponent(ip), 'DELETE', null, '已解封该 IP');
 
   const removeMessage = async (id) => {
     const path = '/api/admin/messages/' + id;
@@ -150,6 +240,9 @@ export default function AdminPage({ token, me }) {
     setSection(id);
     if (id === 'bots' && !bots) loadBots();
     if (id === 'messages' && !messages) loadMessages();
+    if (id === 'pending') loadPending();
+    if (id === 'logins') loadLogins(onlyFail);
+    if (id === 'guard') loadBans();
   };
 
   const c = overview?.counts || {};
@@ -179,6 +272,9 @@ export default function AdminPage({ token, me }) {
             { k: '公开 Bot', v: c.publicBots, sub: '共 ' + c.bots + ' 个' },
             { k: '群聊', v: c.groups, sub: '全部群组' },
             { k: '今日新账号', v: c.newAccountsToday, sub: '封禁 ' + c.banned + ' 个' },
+            { k: '待审核', v: c.pending ?? 0, sub: '等站长放行' },
+            { k: '今日登录', v: c.loginsToday ?? 0, sub: '失败 ' + (c.failedLoginsToday ?? 0) + ' 次' },
+            { k: '封禁 IP', v: c.bannedIps ?? 0, sub: '挡在门口' },
             { k: '数据库', v: fmtBytes(overview.dbBytes), sub: 'SQLite 单文件' },
             { k: '运行时长', v: fmtUptime(overview.uptimeSec), sub: 'v' + overview.version },
           ].map((item) => (
@@ -280,6 +376,197 @@ export default function AdminPage({ token, me }) {
                       }
                     >
                       {a.is_admin ? '取消管理' : '设管理员'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {section === 'pending' ? (
+        <section className="settings-card">
+          <div className="admin-card-head">
+            <div>
+              <h3>注册审核</h3>
+              <p>
+                当前模式：<b>{modeLabel(regMode)}</b>。待审核 {pendingList ? pendingList.length : 0} 个。
+                拒绝会连账号一起删掉。
+              </p>
+            </div>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadPending()}>
+              <Icon name="refresh" size={15} /> 刷新
+            </button>
+          </div>
+          {pendingList === null ? (
+            <SkeletonList rows={3} />
+          ) : pendingList.length === 0 ? (
+            <Empty text="没有待审核的注册" />
+          ) : (
+            <div className="admin-list">
+              {pendingList.map((a) => (
+                <div className="admin-row" key={a.id}>
+                  <Avatar number={a.number} nickname={a.nickname} avatar={a.avatar} size={38} />
+                  <div className="admin-row-main">
+                    <b>
+                      {a.nickname}
+                      <em className="admin-tag">{'#' + a.number}</em>
+                    </b>
+                    <span>
+                      {a.email || '无邮箱'} · {relTime(a.created_at)}申请
+                      {a.ip ? ' · IP ' + a.ip : ''}
+                      {a.device ? ' · ' + a.device : ''}
+                    </span>
+                  </div>
+                  <div className="admin-row-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={busy === '/api/admin/accounts/' + a.number + '/approve'}
+                      onClick={() => approve(a.number, true)}
+                    >
+                      通过
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      disabled={busy === '/api/admin/accounts/' + a.number + '/approve'}
+                      onClick={() => approve(a.number, false)}
+                    >
+                      拒绝
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {section === 'logins' ? (
+        <section className="settings-card">
+          <div className="admin-card-head">
+            <div>
+              <h3>登录记录</h3>
+              <p>谁在什么 IP、什么设备上登录过，失败的也记下来。</p>
+            </div>
+            <div className="admin-filters">
+              <button
+                type="button"
+                className={'admin-chip' + (onlyFail ? '' : ' on')}
+                onClick={() => {
+                  setOnlyFail(false);
+                  loadLogins(false);
+                }}
+              >
+                全部
+              </button>
+              <button
+                type="button"
+                className={'admin-chip' + (onlyFail ? ' on' : '')}
+                onClick={() => {
+                  setOnlyFail(true);
+                  loadLogins(true);
+                }}
+              >
+                只看失败
+              </button>
+            </div>
+          </div>
+          {logins === null ? (
+            <SkeletonList rows={6} />
+          ) : logins.length === 0 ? (
+            <Empty text="还没有登录记录" />
+          ) : (
+            <div className="admin-list">
+              {logins.map((l) => (
+                <div className="admin-row" key={l.id}>
+                  <div className="admin-row-main">
+                    <b>
+                      {l.nickname || '（未知）'}
+                      <em className="admin-tag">{'#' + l.number}</em>
+                      <em className={'admin-tag ' + (l.ok ? 'ok' : 'danger')}>{l.ok ? '成功' : '失败'}</em>
+                    </b>
+                    <span>
+                      {relTime(l.created_at)} · IP {l.ip || '未知'} · {l.device || '未知设备'}
+                      {l.reason ? ' · ' + l.reason : ''}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {section === 'guard' ? (
+        <section className="settings-card">
+          <div className="admin-card-head">
+            <div>
+              <h3>注册模式</h3>
+              <p>决定新用户能不能自己注册进来。</p>
+            </div>
+          </div>
+          <div className="admin-modes">
+            {MODES.map((m) => (
+              <button
+                type="button"
+                key={m.id}
+                className={'admin-mode' + (regMode === m.id ? ' on' : '')}
+                disabled={busy === '/api/admin/settings'}
+                onClick={() => setMode(m.id)}
+              >
+                <b>{m.label}</b>
+                <span>{m.hint}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="admin-card-head admin-card-head-gap">
+            <div>
+              <h3>IP 封禁</h3>
+              <p>被封的 IP 直接挡在门口，连页面都打不开。</p>
+            </div>
+          </div>
+          <div className="admin-toolbar">
+            <label className="admin-search">
+              <Icon name="shield" size={15} />
+              <input value={newIp} onChange={(e) => setNewIp(e.target.value)} placeholder="要封的 IP，例如 203.0.113.7" aria-label="IP" />
+            </label>
+            <label className="admin-search">
+              <Icon name="chat" size={15} />
+              <input value={newReason} onChange={(e) => setNewReason(e.target.value)} placeholder="原因（可留空）" aria-label="原因" />
+            </label>
+            <button type="button" className="btn btn-danger btn-sm" disabled={busy === '/api/admin/ip-bans'} onClick={banIp}>
+              封禁
+            </button>
+          </div>
+          {ipBans === null ? (
+            <SkeletonList rows={3} />
+          ) : ipBans.length === 0 ? (
+            <Empty text="还没有封禁任何 IP" />
+          ) : (
+            <div className="admin-list">
+              {ipBans.map((b) => (
+                <div className="admin-row" key={b.ip}>
+                  <div className="admin-row-main">
+                    <b>
+                      {b.ip}
+                      <em className="admin-tag danger">已封禁</em>
+                    </b>
+                    <span>
+                      {relTime(b.created_at)}封禁{b.reason ? ' · ' + b.reason : ''}
+                    </span>
+                  </div>
+                  <div className="admin-row-actions">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy === '/api/admin/ip-bans/' + b.ip}
+                      onClick={() => unbanIp(b.ip)}
+                    >
+                      解封
                     </button>
                   </div>
                 </div>

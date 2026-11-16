@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../ui/icons.jsx';
 import { Avatar, Confirm, Empty, SkeletonList, Spinner, Toggle, toast } from '../ui/primitives.jsx';
 import { api, shrinkImage, SEND_MODE_KEY, NOTIFY_KEY, TOKEN_KEY, storageGet, storageSet, requestNotifyPermission, normalizeServerInfo } from '../lib/api.js';
-import { fmtSize, statusMeta } from '../lib/format.js';
+import { fmtSize, relTime, statusMeta } from '../lib/format.js';
 import { QrCode, QrScanner } from '../ui/qr.jsx';
 import {
   CHAT_BG_EVENT,
@@ -308,6 +308,30 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
     return () => { alive = false; };
   }, [isAdmin, token]);
 
+  /* 登录设备：能看到自己账号在哪些 IP、什么设备上登录着，可疑的一键踢掉 */
+  const [sessions, setSessions] = useState(null);
+  const loadSessions = useCallback(async () => {
+    try {
+      const data = await api('/api/me/sessions', { token });
+      setSessions(data.sessions || []);
+    } catch {
+      setSessions([]);
+    }
+  }, [token]);
+  useEffect(() => {
+    loadSessions();
+  }, [loadSessions]);
+
+  const dropSession = async (id) => {
+    try {
+      await api('/api/me/sessions/' + id, { token, method: 'DELETE' });
+      toast('已踢掉那台设备', 'success');
+      await loadSessions();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+
   const isBot = me?.type === 'bot';
   const platform = typeof window !== 'undefined' && window.fe?.platform ? window.fe.platform : '浏览器';
 
@@ -515,6 +539,32 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
           <div className="settings-row">
             <div className="settings-row-main"><b><Icon name="plus" size={16} /> 添加账号</b><span>用另一个号码登录，当前账号会被记住</span></div>
             <button type="button" className="btn btn-ghost btn-sm" onClick={onAddAccount}>添加账号</button>
+          </div>
+          <div className="settings-devices">
+            <div className="settings-devices-head">
+              <b><Icon name="monitor" size={16} /> 登录设备</b>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={loadSessions}><Icon name="refresh" size={14} /> 刷新</button>
+            </div>
+            <p className="settings-devices-sub">这是你的账号最近登录过的设备和 IP。看到不认识的就踢掉，然后改密码。</p>
+            {sessions === null ? (
+              <div className="settings-devices-empty"><Spinner size={14} /> 读取中…</div>
+            ) : sessions.length === 0 ? (
+              <div className="settings-devices-empty">还没有记录</div>
+            ) : (
+              <div className="settings-devices-list">
+                {sessions.map((d) => (
+                  <div className="settings-device" key={d.id}>
+                    <div className="settings-device-main">
+                      <b>{d.device || '未知设备'}{d.current ? <em className="settings-device-now">本机</em> : null}</b>
+                      <span>IP {d.ip || '未知'} · {relTime(d.last_seen || d.created_at)}活跃</span>
+                    </div>
+                    {d.current ? null : (
+                      <button type="button" className="btn btn-danger-ghost btn-sm" onClick={() => dropSession(d.id)}>踢掉</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="settings-actions">
             <button type="button" className="btn btn-danger-ghost btn-sm" onClick={() => setConfirm({ title: '退出登录', message: '退出后需要重新输入号码和密码，本地账号记录会保留。', danger: true, onConfirm: () => onLogout?.() })}><Icon name="logout" size={15} /> 退出登录</button>

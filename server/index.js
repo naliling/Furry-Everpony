@@ -62,7 +62,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.17.0.10.23';
+const VERSION = '2026.11.17.0.10.24';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -83,7 +83,7 @@ const tagsSchema = z
   .transform((arr) => [...new Set(arr.map((t) => t.trim()).filter(Boolean))]);
 
 export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {}) {
-  const app = Fastify({ logger: false, bodyLimit: 30 * 1024 * 1024 });
+  const app = Fastify({ logger: false, bodyLimit: 30 * 1024 * 1024, trustProxy: true });
   app.decorate('db', db);
   /* 中心服务器模式：客户端可能是桌面窗口（file://）、局域网页面或远程域名，
      浏览器跨源时会先发 OPTIONS 预检。这里统一放行；鉴权仍然只认 Bearer token。 */
@@ -95,6 +95,17 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     reply.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
     reply.header('Access-Control-Max-Age', '86400');
     if (req.method === 'OPTIONS') return reply.code(204).send();
+    /* 被封禁的 IP 一律挡在门外（爬虫、刷号、爆破） */
+    const visitorIp = clientIp(req);
+    if (isIpBanned(visitorIp)) {
+      return reply.code(403).send({ error: '这个 IP 已被本站封禁' });
+    }
+    /* 全站防洪：每 IP 每分钟 900 次请求，正常用完全够，脚本刷立刻 429 */
+    if (req.url.startsWith('/api/') && req.url !== '/api/health') {
+      if (!hitAllowed(globalHits, visitorIp, 900, 60 * 1000)) {
+        return reply.code(429).send({ error: '请求太频繁了，慢一点再试' });
+      }
+    }
     return undefined;
   });
   const UPLOAD_DIR = uploadDir || DEFAULT_UPLOAD_DIR;
@@ -339,13 +350,95 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     return key.length === expected.length && timingSafeEqual(key, expected);
   }
 
+  /* ---------- 请求来源与设备识别 ---------- */
+  function clientIp(req) {
+    const xff = String((req && req.headers && req.headers['x-forwarded-for']) || '').split(',')[0].trim();
+    const raw = (req && (req.ip || (req.socket && req.socket.remoteAddress))) || '';
+    return String(xff || raw).replace(/^::ffff:/, '') || 'local';
+  }
+
+  /* 把 UA 翻成人话：Windows · Edge / Android · Chrome / iOS · Safari … */
+  function deviceOf(ua) {
+    const s2 = String(ua || '');
+    const os = /Windows/.test(s2)
+      ? 'Windows'
+      : /Android/.test(s2)
+        ? 'Android'
+        : /iPhone|iPad|iPod/.test(s2)
+          ? 'iOS'
+          : /Mac OS X|Macintosh/.test(s2)
+            ? 'macOS'
+            : /Linux/.test(s2)
+              ? 'Linux'
+              : '未知系统';
+    const browser = /Electron/.test(s2)
+      ? '桌面客户端'
+      : /Edg\//.test(s2)
+        ? 'Edge'
+        : /OPR\/|Opera/.test(s2)
+          ? 'Opera'
+          : /Chrome\//.test(s2)
+            ? 'Chrome'
+            : /Firefox\//.test(s2)
+              ? 'Firefox'
+              : /Safari\//.test(s2)
+                ? 'Safari'
+                : '未知浏览器';
+    return os + ' · ' + browser;
+  }
+
+  function requestMeta(req) {
+    const ua = String((req && req.headers && req.headers['user-agent']) || '').slice(0, 300);
+    return { ip: clientIp(req), ua, device: deviceOf(ua) };
+  }
+
+  /* ---------- 站点设置 ---------- */
+  const getSetting = (key, fallback = '') => {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+    return row ? row.value : fallback;
+  };
+  const setSetting = (key, value) => {
+    db.prepare(
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    ).run(key, String(value));
+  };
+  /* 注册模式：open 谁都能注册 / approval 站长审核（默认）/ closed 关闭注册 */
+  const registerMode = () => {
+    const m = getSetting('registerMode', 'approval');
+    return ['open', 'approval', 'closed'].includes(m) ? m : 'approval';
+  };
+
+  /* ---------- IP 封禁（30 秒缓存，别每个请求都查库） ---------- */
+  let banCache = { at: 0, set: new Set() };
+  function bannedIpSet() {
+    if (Date.now() - banCache.at > 30 * 1000) {
+      const rows = db.prepare('SELECT ip FROM ip_bans').all();
+      banCache = { at: Date.now(), set: new Set(rows.map((r) => String(r.ip))) };
+    }
+    return banCache.set;
+  }
+  function isIpBanned(ip) {
+    return bannedIpSet().has(String(ip));
+  }
+  function resetBanCache() {
+    banCache = { at: 0, set: new Set() };
+  }
+
+  /* ---------- 登录流水（成功与失败都记） ---------- */
+  function logLogin({ accountId = null, number = '', ip = '', ua = '', device = '', ok = 0, reason = '' }) {
+    db.prepare(
+      'INSERT INTO login_logs (account_id, number, ip, ua, device, ok, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(accountId, String(number || ''), String(ip || ''), String(ua || ''), String(device || ''), ok ? 1 : 0, String(reason || ''), Date.now());
+  }
+
   /* ---------- 会话 ---------- */
-  function issueSession(accountId) {
+  function issueSession(accountId, req) {
     const token = randomBytes(32).toString('hex');
     const now = Date.now();
+    const meta = requestMeta(req);
     db.prepare(
-      'INSERT INTO sessions (token, account_id, created_at, last_seen) VALUES (?, ?, ?, ?)',
-    ).run(token, accountId, now, now);
+      'INSERT INTO sessions (token, account_id, created_at, last_seen, ip, ua, device) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run(token, accountId, now, now, meta.ip, meta.ua, meta.device);
     return token;
   }
 
@@ -926,6 +1019,9 @@ const CAPTCHA_MAX_TRIES = 5;
 const captchaStore = new Map();
 const captchaHits = new Map();
 const registerHits = new Map();
+const globalHits = new Map();
+const loginFailHits = new Map();
+const loginAccountFail = new Map();
 
 const sweepMap = (map, ttl) => {
   const now = Date.now();
@@ -1028,20 +1124,33 @@ app.get('/api/captcha', async (req, reply) => {
       return reply.code(409).send({ error: '这个号码已经被用了' });
     }
 
+    /* 站点注册模式：open 直接进 / approval 等站长放行 / closed 关站。
+       空库第一人不走这套 —— 新部署必须有人能进去当站长。 */
+    const isEmptySite = !db.prepare('SELECT 1 FROM accounts LIMIT 1').get();
+    const mode = registerMode();
+    if (!isEmptySite && mode === 'closed') {
+      return reply.code(403).send({ error: '本站已关闭注册' });
+    }
+    const needReview = !isEmptySite && mode === 'approval';
+
     const info = db
       .prepare(
-        `INSERT INTO accounts (number, type, nickname, password_hash, created_at, email, tags)
-         VALUES (?, 'user', ?, ?, ?, ?, '[]')`,
+        `INSERT INTO accounts (number, type, nickname, password_hash, created_at, email, tags, approved)
+         VALUES (?, 'user', ?, ?, ?, ?, '[]', ?)`,
       )
-      .run(number, nickname, hashPassword(password), Date.now(), email);
+      .run(number, nickname, hashPassword(password), Date.now(), email, needReview ? 0 : 1);
 
     const accountId = Number(info.lastInsertRowid);
     /* 空库第一个注册的人就是站长：不然新部署永远进不了管理台 */
     const hasAdmin = db.prepare('SELECT 1 FROM accounts WHERE is_admin = 1 LIMIT 1').get();
     const becomesAdmin = !hasAdmin;
     if (becomesAdmin) db.prepare('UPDATE accounts SET is_admin = 1 WHERE id = ?').run(accountId);
+    if (needReview) {
+      logLogin({ accountId, number, ...requestMeta(req), ok: 0, reason: '注册待审核' });
+      return { pending: true, message: '注册成功，等站长审核通过后就能登录' };
+    }
     return {
-      token: issueSession(accountId),
+      token: issueSession(accountId, req),
       account: { id: accountId, number, nickname, type: 'user', bio: '', avatar: '', email, tags: [], is_admin: becomesAdmin },
     };
   });
@@ -1065,20 +1174,34 @@ app.get('/api/captcha', async (req, reply) => {
     const row = db
       .prepare(
         byEmail
-          ? 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash, is_admin, banned, ban_reason FROM accounts WHERE email = ?'
-          : 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash, is_admin, banned, ban_reason FROM accounts WHERE number = ?',
+          ? 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash, is_admin, banned, ban_reason, approved FROM accounts WHERE email = ?'
+          : 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash, is_admin, banned, ban_reason, approved FROM accounts WHERE number = ?',
       )
       .get(byEmail ? raw.toLowerCase() : raw);
 
+    const meta = requestMeta(req);
+    /* 撞库防护：同一 IP 10 分钟错 20 次、同一账号 10 分钟错 5 次就锁一会儿 */
+    if (!hitAllowed(loginFailHits, meta.ip, 20, 10 * 60 * 1000) || !hitAllowed(loginAccountFail, raw.toLowerCase(), 5, 10 * 60 * 1000)) {
+      logLogin({ number: raw, ...meta, ok: 0, reason: '尝试太频繁' });
+      return reply.code(429).send({ error: '密码错太多次了，10 分钟后再试' });
+    }
     if (!row || !verifyPassword(parsed.data.password, row.password_hash)) {
+      logLogin({ accountId: row ? row.id : null, number: raw, ...meta, ok: 0, reason: '密码错误' });
       return reply.code(401).send({ error: byEmail ? '邮箱或密码不对' : '号码或密码不对' });
     }
     if (Number(row.banned) === 1) {
+      logLogin({ accountId: row.id, number: row.number, ...meta, ok: 0, reason: '已封禁' });
       return reply.code(403).send({ error: '这个账号已被封禁' + (row.ban_reason ? '：' + row.ban_reason : '') });
     }
+    if (Number(row.approved ?? 1) === 0) {
+      logLogin({ accountId: row.id, number: row.number, ...meta, ok: 0, reason: '待审核' });
+      return reply.code(403).send({ error: '账号还在等站长审核' });
+    }
+    logLogin({ accountId: row.id, number: row.number, ...meta, ok: 1, reason: '登录成功' });
+    db.prepare('UPDATE accounts SET last_login_ip = ?, last_login_at = ? WHERE id = ?').run(meta.ip, Date.now(), row.id);
 
     return {
-      token: issueSession(row.id),
+      token: issueSession(row.id, req),
       account: {
         id: row.id,
         number: row.number,
@@ -1111,6 +1234,37 @@ app.get('/api/captcha', async (req, reply) => {
         ...presenceOf(me.id),
       },
     };
+  });
+
+  /* ---------- 我的登录设备 ---------- */
+  app.get('/api/me/sessions', async (req, reply) => {
+    const me = requireAuth(req, reply);
+    if (!me) return;
+    const current = String(req.headers.authorization || '').slice(7);
+    const rows = db
+      .prepare(
+        'SELECT token, ip, device, ua, created_at, last_seen FROM sessions WHERE account_id = ? ORDER BY last_seen DESC LIMIT 50',
+      )
+      .all(me.id);
+    return {
+      sessions: rows.map((r) => ({
+        id: r.token.slice(0, 12),
+        ip: r.ip || '',
+        device: r.device || '未知设备',
+        created_at: r.created_at,
+        last_seen: r.last_seen,
+        current: r.token === current,
+      })),
+    };
+  });
+
+  app.delete('/api/me/sessions/:id', async (req, reply) => {
+    const me = requireAuth(req, reply);
+    if (!me) return;
+    const prefix = String(req.params.id || '').replace(/[^0-9a-f]/gi, '');
+    if (prefix.length < 8) return reply.code(400).send({ error: '设备标识不对' });
+    const info = db.prepare("DELETE FROM sessions WHERE account_id = ? AND token LIKE ? || '%'").run(me.id, prefix);
+    return { ok: true, removed: Number(info.changes || 0) };
   });
 
   /* ---------- 访问入口信息（不需要登录：设置页和扫码都要用） ---------- */
@@ -1167,10 +1321,141 @@ app.get('/api/captcha', async (req, reply) => {
         newAccountsToday: one('SELECT COUNT(*) AS n FROM accounts WHERE created_at >= ?', today).n || 0,
         messagesToday: one('SELECT COUNT(*) AS n FROM messages WHERE created_at >= ?', today).n || 0,
         onlineNow: one('SELECT COUNT(DISTINCT account_id) AS n FROM sessions WHERE last_seen >= ?', Date.now() - ONLINE_WINDOW).n || 0,
+        pending: one('SELECT COUNT(*) AS n FROM accounts WHERE approved = 0').n || 0,
+        loginsToday: one('SELECT COUNT(*) AS n FROM login_logs WHERE ok = 1 AND created_at >= ?', today).n || 0,
+        failedLoginsToday: one('SELECT COUNT(*) AS n FROM login_logs WHERE ok = 0 AND created_at >= ?', today).n || 0,
+        bannedIps: one('SELECT COUNT(*) AS n FROM ip_bans').n || 0,
+        registerMode: registerMode(),
       },
       dbBytes,
       uptimeSec: Math.round(process.uptime()),
     };
+  });
+
+  /* ---------- 注册模式（站点设置） ---------- */
+  app.get('/api/admin/settings', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const one = (sql) => db.prepare(sql).get() || {};
+    return {
+      registerMode: registerMode(),
+      pending: one('SELECT COUNT(*) AS n FROM accounts WHERE approved = 0').n || 0,
+      bannedIps: one('SELECT COUNT(*) AS n FROM ip_bans').n || 0,
+    };
+  });
+
+  app.patch('/api/admin/settings', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z
+      .object({ registerMode: z.enum(['open', 'approval', 'closed']) })
+      .safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: '注册模式只能是 open / approval / closed' });
+    setSetting('registerMode', parsed.data.registerMode);
+    return { ok: true, registerMode: parsed.data.registerMode };
+  });
+
+  /* ---------- 待审核账号 ---------- */
+  app.get('/api/admin/pending', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const rows = db
+      .prepare(
+        `SELECT a.id, a.number, a.nickname, a.email, a.created_at,
+                (SELECT l.ip FROM login_logs l WHERE l.account_id = a.id ORDER BY l.id DESC LIMIT 1) AS ip,
+                (SELECT l.device FROM login_logs l WHERE l.account_id = a.id ORDER BY l.id DESC LIMIT 1) AS device
+           FROM accounts a WHERE a.approved = 0 ORDER BY a.created_at DESC LIMIT 200`,
+      )
+      .all();
+    return { pending: rows };
+  });
+
+  app.post('/api/admin/accounts/:number/approve', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z.object({ approve: z.boolean() }).safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: '参数不对' });
+    const target = findAccountByNumber(req.params.number);
+    if (!target) return reply.code(404).send({ error: '没有这个账号' });
+    if (parsed.data.approve) {
+      db.prepare('UPDATE accounts SET approved = 1 WHERE id = ?').run(target.id);
+      return { ok: true, number: target.number, approved: true };
+    }
+    /* 拒绝 = 直接删号，会话与关系跟着级联删掉 */
+    db.transaction(() => {
+      db.prepare('DELETE FROM sessions WHERE account_id = ?').run(target.id);
+      db.prepare('DELETE FROM accounts WHERE id = ?').run(target.id);
+    })();
+    return { ok: true, number: target.number, approved: false, deleted: true };
+  });
+
+  /* ---------- 登录记录（成功与失败都列，用来抓撞库） ---------- */
+  app.get('/api/admin/logins', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(300).optional(),
+        only: z.enum(['all', 'fail']).optional(),
+        q: z.string().trim().max(64).optional(),
+      })
+      .safeParse(req.query || {});
+    if (!parsed.success) return reply.code(400).send({ error: '查询参数不对' });
+    const limit = parsed.data.limit || 100;
+    const where = [];
+    const args = [];
+    if (parsed.data.only === 'fail') where.push('ok = 0');
+    const kw = (parsed.data.q || '').trim();
+    if (kw) {
+      where.push('(number LIKE ? OR ip LIKE ? OR device LIKE ?)');
+      const like = '%' + kw + '%';
+      args.push(like, like, like);
+    }
+    const rows = db
+      .prepare(
+        `SELECT l.id, l.account_id, l.number, l.ip, l.device, l.ok, l.reason, l.created_at,
+                (SELECT a.nickname FROM accounts a WHERE a.id = l.account_id) AS nickname
+           FROM login_logs l
+          ${where.length ? 'WHERE ' + where.map((w) => w.replace(/\b(ok|number|ip|device)\b/g, 'l.$1')).join(' AND ') : ''}
+          ORDER BY l.id DESC LIMIT ?`,
+      )
+      .all(...args, limit);
+    return { logins: rows.map((r) => ({ ...r, ok: Number(r.ok) === 1 })) };
+  });
+
+  /* ---------- IP 封禁 ---------- */
+  app.get('/api/admin/ip-bans', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    return {
+      bans: db.prepare('SELECT ip, reason, created_at FROM ip_bans ORDER BY created_at DESC LIMIT 300').all(),
+    };
+  });
+
+  app.post('/api/admin/ip-bans', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const parsed = z
+      .object({ ip: z.string().trim().min(3).max(64), reason: z.string().trim().max(120).optional() })
+      .safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ error: 'IP 格式不对' });
+    const ip = parsed.data.ip.replace(/^::ffff:/, '');
+    db.prepare(
+      'INSERT INTO ip_bans (ip, reason, created_at) VALUES (?, ?, ?) ON CONFLICT(ip) DO UPDATE SET reason = excluded.reason',
+    ).run(ip, parsed.data.reason || '', Date.now());
+    resetBanCache();
+    /* 这个 IP 上已经登录的会话一起踢掉 */
+    db.prepare('DELETE FROM sessions WHERE ip = ?').run(ip);
+    return { ok: true, ip };
+  });
+
+  app.delete('/api/admin/ip-bans/:ip', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ip = String(req.params.ip || '').replace(/^::ffff:/, '');
+    db.prepare('DELETE FROM ip_bans WHERE ip = ?').run(ip);
+    resetBanCache();
+    return { ok: true, ip };
   });
 
   app.get('/api/admin/accounts', async (req, reply) => {
