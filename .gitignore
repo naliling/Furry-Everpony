@@ -2,18 +2,18 @@
 node_modules/
 .pnpm-store/
 
-# 本地工具链与下载的二进制（Node 便携版、homeserver 安装包）
-.tools/
+# 本地工具链与下载的二进制（Node 便携版等）：只放行运维脚本
+.tools/*
+!.tools/launch-server.mjs
+!.tools/restart-server.ps1
+!.tools/start-server.vbs
+!.tools/server.env
 
 # 构建产物
 dist/
 build/*
 !build/icon.png
 !build/icon.ico
-android/build/
-android/build-test/
-android/dist/
-dist-apk/
 *.idsig
 *.tsbuildinfo
 
@@ -43,10 +43,6 @@ desktop.ini
 
 # 打包产物（体积大，不进版本库）
 release/
-# 安卓构建中间产物（assets/web 是 vite 产物拷进来的，不入库）
-android/assets/
-android/build-local/
-android/keystore/
 
 # gh/git 本地状态
 .local/
