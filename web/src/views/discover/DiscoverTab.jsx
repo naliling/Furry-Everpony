@@ -86,8 +86,8 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
     <div className="discover-tab">
       <header className="page-head">
         <div>
-          <h2>发现</h2>
-          <p className="page-sub">Bot 广场、我的 Bot、模型与接入配置</p>
+          <h2>广场</h2>
+          <p className="page-sub">逛公开的 Bot，或者打理自己的 Bot 与接入配置</p>
         </div>
         <div className="page-head-actions">
           <div className="segmented">
@@ -121,7 +121,12 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
                     <span className="bot-card-avatar"><Avatar number={bot.number} nickname={bot.nickname} avatar={bot.avatar} size={46} square /></span>
                     <span className="bot-card-main">
                       <span className="bot-card-name">{bot.nickname || bot.number}<span className="bot-card-online"><i className={bot.online ? 'on' : ''} /></span></span>
-                      <span className="bot-card-number">{bot.number}{bot.remote ? <span className="tag tag-accent">远程</span> : null}</span>
+                      <span className="bot-card-number">#{bot.number}{bot.remote ? <span className="tag tag-accent">远程</span> : null}</span>
+                      {(bot.tags || []).length ? (
+                        <span className="bot-card-tags">
+                          {(bot.tags || []).slice(0, 4).map((t) => <span className="tag-chip" key={t}>{t}</span>)}
+                        </span>
+                      ) : null}
                       <span className="bot-card-bio">{bot.bio || '这个 Bot 还没有签名'}</span>
                     </span>
                     <span className="bot-card-tag"><Icon name={bot.remote ? 'link' : 'bot'} size={12} /> {bot.remote ? '跨实例' : 'Bot'}</span>
@@ -143,7 +148,12 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
                       <span className="bot-card-avatar"><Avatar number={bot.number} nickname={bot.nickname} avatar={bot.avatar} size={46} square /></span>
                       <span className="bot-card-main">
                         <span className="bot-card-name">{bot.nickname || bot.number}<span className="bot-card-online"><i className={bot.online ? 'on' : ''} /></span></span>
-                        <span className="bot-card-number">{bot.number}<span className="tag">{bot.public ? '公开' : '私有'}</span></span>
+                        <span className="bot-card-number">#{bot.number}<span className="tag">{bot.public ? '公开' : '私有'}</span></span>
+                        {(bot.tags || []).length ? (
+                          <span className="bot-card-tags">
+                            {(bot.tags || []).slice(0, 4).map((t) => <span className="tag-chip" key={t}>{t}</span>)}
+                          </span>
+                        ) : null}
                         <span className="bot-card-bio">{bot.bio || '还没有签名'}</span>
                       </span>
                     </button>
@@ -194,7 +204,13 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
   const [tab, setTab] = useState(own ? initialTab : 'overview');
   const [link, setLink] = useState(null);
   const [stats, setStats] = useState(null);
-  const [form, setForm] = useState({ nickname: bot.nickname || '', bio: bot.bio || '', public: !!bot.public });
+  const [form, setForm] = useState({
+    nickname: bot.nickname || '',
+    bio: bot.bio || '',
+    public: !!bot.public,
+    tagsText: (bot.tags || []).join(' '),
+  });
+  const parseTags = (text) => String(text || '').split(/[\s,，]+/).map((t) => t.trim()).filter(Boolean).slice(0, 5);
   const [saving, setSaving] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
 
@@ -209,7 +225,7 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
   const save = async () => {
     setSaving(true);
     try {
-      await api('/api/bots/' + bot.number, { method: 'PATCH', token, body: { nickname: form.nickname.trim(), bio: form.bio, public: form.public } });
+      await api('/api/bots/' + bot.number, { method: 'PATCH', token, body: { nickname: form.nickname.trim(), bio: form.bio, public: form.public, tags: parseTags(form.tagsText) } });
       toast('已保存', 'success');
       onChanged?.();
     } catch (err) { toast(err.message, 'error'); } finally { setSaving(false); }
@@ -225,6 +241,9 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
         <div className="bot-detail-id">
           <h3>{bot.nickname || '未命名 Bot'}</h3>
           <p className="bot-detail-number">{bot.number}<span className="tag">{own ? '我的 Bot' : 'Bot'}</span>{bot.public ? <span className="tag tag-accent">公开</span> : null}{remote ? <span className="tag tag-accent">来自 {bot.addr || '别的实例'}</span> : null}</p>
+          {(bot.tags || []).length ? (
+            <p className="bot-detail-tags">{(bot.tags || []).map((t) => <span className="tag-chip" key={t}>{t}</span>)}</p>
+          ) : null}
           <p className="bot-detail-bio">{bot.bio || '这个 Bot 还没有签名'}</p>
         </div>
         <div className="bot-detail-actions">
@@ -254,6 +273,7 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
                 <label className="field"><span className="field-label">公开到广场</span><div className="field-toggle"><Toggle checked={form.public} onChange={(v) => setForm({ ...form, public: v })} label="公开" /></div></label>
               </div>
               <label className="field"><span className="field-label">签名</span><textarea className="input textarea" rows={2} maxLength={80} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /></label>
+              <label className="field"><span className="field-label">标签 <span className="field-hint">空格分隔，最多 5 个，每个 12 字内</span></span><input className="input" placeholder="例如 陪伴 中文 治愈" value={form.tagsText} onChange={(e) => setForm({ ...form, tagsText: e.target.value })} /></label>
               <div className="bot-form-actions">
                 <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={save}>{saving ? <Spinner size={14} /> : <Icon name="check" size={15} />} 保存资料</button>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTokenOpen(true)}><Icon name="lock" size={15} /> 查看 Bot 令牌</button>
@@ -462,15 +482,16 @@ function LinkPanel({ token, bot, link, onChanged, onCopy }) {
 }
 
 function CreateBotModal({ token, onClose, onCreated }) {
-  const [form, setForm] = useState({ number: '', nickname: '', bio: '', public: false });
+  const [form, setForm] = useState({ number: '', nickname: '', bio: '', public: false, tagsText: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const valid = /^\d{5,12}$/.test(form.number) && form.nickname.trim().length > 0;
+  const valid = /^[1-9]\d{7,10}$/.test(form.number) && form.nickname.trim().length > 0;
   const submit = async () => {
     if (!valid) return;
     setBusy(true); setError('');
     try {
-      const r = await api('/api/bots', { method: 'POST', token, body: { number: form.number, nickname: form.nickname.trim(), bio: form.bio, public: form.public } });
+      const tags = String(form.tagsText || '').split(/[\s,，]+/).map((t) => t.trim()).filter(Boolean).slice(0, 5);
+      const r = await api('/api/bots', { method: 'POST', token, body: { number: form.number, nickname: form.nickname.trim(), bio: form.bio, public: form.public, tags } });
       toast('Bot 创建成功', 'success');
       onCreated(r.bot);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
@@ -479,10 +500,11 @@ function CreateBotModal({ token, onClose, onCreated }) {
     <Modal title="创建 Bot" icon="bot" width={480} onClose={onClose}>
       {error ? <div className="auth-error">{error}</div> : null}
       <div className="bot-form">
-        <label className="field"><span className="field-label">号码</span><input className="input input-number" inputMode="numeric" placeholder="5–12 位数字" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value.replace(/\D/g, '').slice(0, 12) })} /></label>
+        <label className="field"><span className="field-label">号码</span><input className="input input-number" inputMode="numeric" placeholder="8–11 位数字" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value.replace(/\D/g, '').replace(/^0+/, '').slice(0, 11) })} /></label>
         <label className="field"><span className="field-label">昵称</span><input className="input" maxLength={24} placeholder="给它起个名字" value={form.nickname} onChange={(e) => setForm({ ...form, nickname: e.target.value })} /></label>
         <label className="field"><span className="field-label">签名</span><textarea className="input textarea" rows={2} maxLength={80} placeholder="一句话介绍" value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /></label>
-        <label className="field field-inline"><Toggle checked={form.public} onChange={(v) => setForm({ ...form, public: v })} label="公开到 Bot 广场" /><span className="field-hint">公开后别人可以在广场找到它</span></label>
+        <label className="field"><span className="field-label">标签 <span className="field-hint">空格分隔，最多 5 个</span></span><input className="input" placeholder="例如 陪伴 中文 治愈" value={form.tagsText} onChange={(e) => setForm({ ...form, tagsText: e.target.value })} /></label>
+        <label className="field field-inline"><Toggle checked={form.public} onChange={(v) => setForm({ ...form, public: v })} label="公开到 Bot 广场" /><span className="field-hint">公开后别人不用加好友就能找它聊天</span></label>
       </div>
       <div className="modal-foot">
         <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>

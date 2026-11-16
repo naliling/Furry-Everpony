@@ -3378,3 +3378,279 @@ body,
   .settings-server-item { flex-wrap: wrap; }
   .settings-server-item code { flex: 1 1 100%; order: 3; }
 }
+
+/* ================= 游客广场首页（未登录） ================= */
+.plaza-page {
+  position: relative;
+  min-height: 100%;
+  width: 100%;
+  padding: 18px clamp(14px, 4vw, 46px) 34px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-base);
+}
+.plaza-glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(52% 44% at 12% -6%, rgba(75, 225, 255, 0.16), transparent 62%),
+    radial-gradient(48% 42% at 92% 2%, rgba(167, 123, 255, 0.18), transparent 60%),
+    radial-gradient(60% 50% at 50% 108%, rgba(255, 107, 214, 0.1), transparent 66%);
+}
+.plaza-page > *:not(.plaza-glow) {
+  position: relative;
+  z-index: 1;
+}
+.plaza-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 1180px;
+  margin: 0 auto 26px;
+}
+.plaza-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.plaza-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  border: 1px solid rgba(75, 225, 255, 0.42);
+  background: linear-gradient(150deg, rgba(75, 225, 255, 0.3), rgba(167, 123, 255, 0.32));
+  color: #eaf8ff;
+  box-shadow: 0 0 0 1px rgba(167, 123, 255, 0.14) inset, 0 12px 28px -14px rgba(75, 225, 255, 0.85);
+}
+.plaza-brand strong {
+  display: block;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.plaza-brand span {
+  display: block;
+  margin-top: 1px;
+  color: var(--text-3);
+  font-size: 0.7rem;
+}
+.plaza-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.plaza-top-actions .btn {
+  width: auto;
+}
+.plaza-hero-lg {
+  max-width: 1180px;
+  margin: 0 auto 22px;
+  padding: clamp(24px, 4vw, 46px) clamp(20px, 4vw, 46px);
+  border-radius: 26px;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(120% 130% at 0% 0%, rgba(75, 225, 255, 0.14), transparent 58%),
+    radial-gradient(130% 140% at 100% 0%, rgba(167, 123, 255, 0.18), transparent 60%),
+    var(--grad-panel);
+  overflow: hidden;
+  text-align: center;
+}
+.plaza-hero-lg h1 {
+  font-size: clamp(1.6rem, 4.4vw, 2.7rem);
+  font-weight: 820;
+  letter-spacing: -0.02em;
+  line-height: 1.18;
+}
+.plaza-hero-lg p {
+  max-width: 560px;
+  margin: 12px auto 0;
+  color: var(--text-2);
+  font-size: 0.86rem;
+  line-height: 1.75;
+}
+.plaza-hero-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 18px;
+  margin: 18px 0 4px;
+  color: var(--text-3);
+  font-size: 0.74rem;
+}
+.plaza-hero-stats b {
+  color: var(--cyan);
+  font-weight: 750;
+}
+.plaza-search-lg {
+  max-width: 520px;
+  margin: 18px auto 0;
+}
+.plaza-list-wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+.plaza-grid {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.plaza-card {
+  align-items: center;
+  padding: 15px 16px;
+  cursor: pointer;
+  border-radius: 18px;
+}
+.plaza-card:hover .plaza-card-go {
+  opacity: 1;
+  transform: translateX(2px);
+  border-color: rgba(75, 225, 255, 0.5);
+  color: var(--cyan);
+}
+.plaza-card-go {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  color: var(--text-3);
+  opacity: 0.65;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.plaza-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  max-width: 1180px;
+  margin: 30px auto 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: 0.74rem;
+}
+.plaza-foot .btn {
+  width: auto;
+}
+
+/* 标签小片：卡片与详情共用 */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 150, 255, 0.26);
+  background: rgba(120, 150, 255, 0.09);
+  color: var(--text-2);
+  font-size: 0.65rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.bot-card-tags,
+.bot-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+.bot-detail-tags {
+  margin: 8px 0 2px;
+}
+
+/* 未登录广场卡片里的在线点：离线时压暗 */
+.plaza-card .bot-card-online i {
+  background: var(--text-3);
+  box-shadow: none;
+  opacity: 0.55;
+}
+.plaza-card .bot-card-online i.on {
+  background: var(--green);
+  box-shadow: 0 0 6px currentColor;
+  opacity: 1;
+}
+
+/* 登录页「回广场逛逛」 */
+.auth-back-plaza {
+  width: auto;
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-2);
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.auth-back-plaza:hover {
+  border-color: rgba(75, 225, 255, 0.4);
+  background: rgba(75, 225, 255, 0.08);
+  color: var(--cyan);
+}
+
+@media (max-width: 779px) {
+  .plaza-page {
+    padding: 14px 14px 28px;
+  }
+  .plaza-top {
+    margin-bottom: 18px;
+  }
+  .plaza-hero-lg {
+    border-radius: 20px;
+    padding: 26px 18px;
+  }
+  .plaza-hero-stats {
+    gap: 6px 14px;
+    font-size: 0.7rem;
+  }
+  .plaza-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .plaza-card {
+    padding: 13px 14px;
+  }
+  .plaza-foot {
+    margin-top: 22px;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+
+/* 旧样式表（styles.css:151 / :875）给 .btn-primary 与 .btn-ghost 写了 width:100%，
+   会让工具栏里的小按钮撑满整行。这里收回自适应，需要整行的仍用 .btn-block。 */
+.btn-primary,
+.btn-ghost {
+  width: auto;
+}
+.btn-block {
+  width: 100%;
+}
+
+
+/* 手机端：广场页头部按钮换行后别贴太紧 */
+@media (max-width: 560px) {
+  .page-head-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .page-head-actions .segmented {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+

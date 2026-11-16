@@ -62,10 +62,25 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.16.0.10.18';
+const VERSION = '2026.11.16.0.10.19';
 
-const NUMBER_RE = /^[1-9]\d{4,11}$/;
-const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 5–12 位数字，且不能以 0 开头');
+const NUMBER_RE = /^[1-9]\d{7,10}$/;
+const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
+
+/* 邮箱只做形状校验，不校验 MX（自托管不联网也能注册） */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailSchema = z
+  .string()
+  .trim()
+  .max(120, '邮箱太长了')
+  .refine((v) => EMAIL_RE.test(v), '邮箱格式不对')
+  .transform((v) => v.toLowerCase());
+
+/* Bot 标签：最多 5 个、每个 12 字内，去重 */
+const tagsSchema = z
+  .array(z.string().trim().min(1, '标签不能为空').max(12, '标签最多 12 个字'))
+  .max(5, '最多 5 个标签')
+  .transform((arr) => [...new Set(arr.map((t) => t.trim()).filter(Boolean))]);
 
 export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {}) {
   const app = Fastify({ logger: false, bodyLimit: 30 * 1024 * 1024 });
@@ -344,7 +359,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
   function findAccountByNumber(number) {
     return db
       .prepare(
-        'SELECT id, number, type, nickname, bio, avatar, card_bg, photos, owner_id, is_public FROM accounts WHERE number = ?',
+        'SELECT id, number, type, nickname, bio, avatar, card_bg, photos, owner_id, is_public, tags, email FROM accounts WHERE number = ?',
       )
       .get(number);
   }
@@ -353,6 +368,14 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     return !!db
       .prepare('SELECT 1 FROM friendships WHERE a_id = ? AND b_id = ?')
       .get(aId, bId);
+  }
+
+  /* 谁能直接开私聊：好友，或者对方是公开 Bot（广场点进来就能聊，不用先加好友） */
+  function canOpenDm(meId, target) {
+    if (!target) return false;
+    if (target.id === meId) return false;
+    if (areFriends(meId, target.id)) return true;
+    return target.type === 'bot' && Number(target.is_public) === 1;
   }
 
   function isBlocked(aId, bId) {
@@ -483,6 +506,17 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     try {
       const v = JSON.parse(raw);
       return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** 标签存成 JSON 数组文本，读出来永远是数组 */
+  function parseTags(raw) {
+    if (!raw) return [];
+    try {
+      const v = JSON.parse(raw);
+      return Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 5) : [];
     } catch {
       return [];
     }
@@ -867,47 +901,62 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
   /* ---------- 注册 ---------- */
   app.post('/api/register', async (req, reply) => {
     const schema = z.object({
+      email: emailSchema,
       number: numberSchema,
-      password: z.string().min(8).max(128),
-      nickname: z.string().min(1).max(24),
+      password: z.string().min(8, '密码至少 8 位').max(128),
+      nickname: z.string().trim().min(1, '昵称不能为空').max(24, '昵称最多 24 个字'),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
-    const { number, password, nickname } = parsed.data;
+    const { email, number, password, nickname } = parsed.data;
 
+    if (db.prepare('SELECT 1 FROM accounts WHERE email = ?').get(email)) {
+      return reply.code(409).send({ error: '这个邮箱已经注册过了' });
+    }
     if (findAccountByNumber(number)) {
       return reply.code(409).send({ error: '这个号码已经被用了' });
     }
 
     const info = db
       .prepare(
-        `INSERT INTO accounts (number, type, nickname, password_hash, created_at)
-         VALUES (?, 'user', ?, ?, ?)`,
+        `INSERT INTO accounts (number, type, nickname, password_hash, created_at, email, tags)
+         VALUES (?, 'user', ?, ?, ?, ?, '[]')`,
       )
-      .run(number, nickname, hashPassword(password), Date.now());
+      .run(number, nickname, hashPassword(password), Date.now(), email);
 
     const accountId = Number(info.lastInsertRowid);
     return {
       token: issueSession(accountId),
-      account: { id: accountId, number, nickname, type: 'user', bio: '', avatar: '' },
+      account: { id: accountId, number, nickname, type: 'user', bio: '', avatar: '', email, tags: [] },
     };
   });
 
   /* ---------- 登录 ---------- */
   app.post('/api/login', async (req, reply) => {
     const parsed = z
-      .object({ number: z.string().min(1), password: z.string().min(1) })
+      .object({
+        identifier: z.string().trim().min(1).optional(),
+        number: z.string().trim().min(1).optional(),
+        email: z.string().trim().min(1).optional(),
+        password: z.string().min(1, '请填写密码'),
+      })
       .safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: '请填写号码和密码' });
+    if (!parsed.success) return reply.code(400).send({ error: '请填写邮箱（或号码）和密码' });
+
+    const raw = (parsed.data.identifier || parsed.data.number || parsed.data.email || '').trim();
+    if (!raw) return reply.code(400).send({ error: '请填写邮箱或号码' });
+    const byEmail = raw.includes('@');
 
     const row = db
       .prepare(
-        'SELECT id, number, type, nickname, bio, avatar, password_hash FROM accounts WHERE number = ?',
+        byEmail
+          ? 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash FROM accounts WHERE email = ?'
+          : 'SELECT id, number, type, nickname, bio, avatar, email, tags, password_hash FROM accounts WHERE number = ?',
       )
-      .get(parsed.data.number);
+      .get(byEmail ? raw.toLowerCase() : raw);
 
     if (!row || !verifyPassword(parsed.data.password, row.password_hash)) {
-      return reply.code(401).send({ error: '号码或密码不对' });
+      return reply.code(401).send({ error: byEmail ? '邮箱或密码不对' : '号码或密码不对' });
     }
 
     return {
@@ -919,6 +968,8 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
         type: row.type,
         bio: row.bio,
         avatar: row.avatar || '',
+        email: row.email || '',
+        tags: parseTags(row.tags),
       },
     };
   });
@@ -929,10 +980,17 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     if (!me) return;
     const row = db
       .prepare(
-        'SELECT id, number, type, nickname, bio, avatar, card_bg, photos, status, owner_id, created_at FROM accounts WHERE id = ?',
+        'SELECT id, number, type, nickname, bio, avatar, card_bg, photos, status, owner_id, created_at, email, tags FROM accounts WHERE id = ?',
       )
       .get(me.id);
-    return { account: { ...row, photos: parsePhotos(row.photos), ...presenceOf(me.id) } };
+    return {
+      account: {
+        ...row,
+        photos: parsePhotos(row.photos),
+        tags: parseTags(row.tags),
+        ...presenceOf(me.id),
+      },
+    };
   });
 
   /* ---------- 改资料 ---------- */
@@ -1598,7 +1656,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const target = findAccountByNumber(parsed.data.number);
     if (!target) return reply.code(404).send({ error: '没有这个号码' });
     if (target.id === me.id) return reply.code(400).send({ error: '不能和自己聊' });
-    if (!areFriends(me.id, target.id)) return reply.code(403).send({ error: '还不是好友，先加好友' });
+    if (!canOpenDm(me.id, target)) return reply.code(403).send({ error: '还不是好友，先加好友' });
 
     return { conversationId: getOrCreateDm(me.id, target.id) };
   });
@@ -1615,7 +1673,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const target = findAccountByNumber(parsed.data.to);
     if (!target) return reply.code(404).send({ error: '没有这个号码' });
     if (target.id === me.id) return reply.code(400).send({ error: '不能给自己发' });
-    if (!areFriends(me.id, target.id)) return reply.code(403).send({ error: '还不是好友，先加好友' });
+    if (!canOpenDm(me.id, target)) return reply.code(403).send({ error: '还不是好友，先加好友' });
     if (isBlocked(target.id, me.id)) return reply.code(403).send({ error: '对方已把你拉黑' });
 
     const convId = getOrCreateDm(me.id, target.id);
@@ -2531,9 +2589,10 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const parsed = z
       .object({
         number: numberSchema,
-        nickname: z.string().min(1).max(24),
+        nickname: z.string().trim().min(1, '名字不能为空').max(24, '名字最多 24 个字'),
         bio: z.string().max(200).optional(),
         public: z.boolean().optional(),
+        tags: tagsSchema.optional(),
       })
       .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
@@ -2545,8 +2604,8 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     const token = onebot.newToken();
     const info = db
       .prepare(
-        `INSERT INTO accounts (number, type, nickname, bio, password_hash, created_at, owner_id, access_token, is_public)
-         VALUES (?, 'bot', ?, ?, NULL, ?, ?, ?, ?)`,
+        `INSERT INTO accounts (number, type, nickname, bio, password_hash, created_at, owner_id, access_token, is_public, tags)
+         VALUES (?, 'bot', ?, ?, NULL, ?, ?, ?, ?, ?)`,
       )
       .run(
         parsed.data.number,
@@ -2556,6 +2615,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
         me.id,
         token,
         parsed.data.public ? 1 : 0,
+        JSON.stringify(parsed.data.tags || []),
       );
     const id = Number(info.lastInsertRowid);
     db.prepare('INSERT OR IGNORE INTO friendships (a_id, b_id, created_at) VALUES (?, ?, ?)').run(
@@ -2572,6 +2632,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
         nickname: parsed.data.nickname,
         token,
         public: !!parsed.data.public,
+        tags: parsed.data.tags || [],
       },
       ws: `/onebot/v11/ws`,
     };
@@ -2664,9 +2725,9 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     }
   });
 
+  // 广场：游客也能看（不登录返回空 friendSet、isMine 全 false）
   app.get('/api/bots/public', async (req, reply) => {
-    const me = requireAuth(req, reply);
-    if (!me) return;
+    const me = auth(req);
     const q = String(req.query.q || '').trim();
     const limit = Math.min(Number(req.query.limit) || 50, 100);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
@@ -2674,24 +2735,26 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
 
     const rows = db
       .prepare(
-        `SELECT a.id, a.number, a.nickname, a.bio, a.avatar,
+        `SELECT a.id, a.number, a.nickname, a.bio, a.avatar, a.tags,
                 (SELECT COUNT(*) FROM friendships f WHERE f.a_id = a.id OR f.b_id = a.id) AS added
            FROM accounts a
           WHERE a.type = 'bot' AND a.is_public = 1
-            AND (? = '' OR a.number LIKE ? OR a.nickname LIKE ?)
+            AND (? = '' OR a.number LIKE ? OR a.nickname LIKE ? OR a.tags LIKE ?)
           ORDER BY a.id DESC
           LIMIT 200`,
       )
-      .all(q, like, like);
+      .all(q, like, like, like);
 
     const friendSet = new Set(
-      db
-        .prepare(
-          `SELECT CASE WHEN a_id = ? THEN b_id ELSE a_id END AS other
-             FROM friendships WHERE a_id = ? OR b_id = ?`,
-        )
-        .all(me.id, me.id, me.id)
-        .map((r) => r.other),
+      me
+        ? db
+            .prepare(
+              `SELECT CASE WHEN a_id = ? THEN b_id ELSE a_id END AS other
+                 FROM friendships WHERE a_id = ? OR b_id = ?`,
+            )
+            .all(me.id, me.id, me.id)
+            .map((r) => r.other)
+        : [],
     );
 
     const localBots = rows.map((b) => ({
@@ -2699,10 +2762,11 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
       nickname: b.nickname,
       bio: b.bio,
       avatar: b.avatar || '',
+      tags: parseTags(b.tags),
       online: onebot.isOnline(b.id),
       added: b.added,
       isFriend: friendSet.has(b.id),
-      isMine: b.id === me.id,
+      isMine: me ? b.id === me.id : false,
       remote: false,
       addr: '',
       instance: '',
@@ -2723,36 +2787,54 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
       /* 局域网发现没起来不影响本机列表 */
     }
 
-    const remoteBots = [];
-    for (const addr of addrs.slice(0, 8)) {
-      try {
-        const ctl = new AbortController();
-        const timer = setTimeout(() => ctl.abort(), 4000);
-        const resp = await fetch(`http://${addr}/api/federation/bots`, { signal: ctl.signal });
-        clearTimeout(timer);
-        if (!resp.ok) continue;
-        const body = await resp.json();
-        for (const b of Array.isArray(body.bots) ? body.bots : []) {
-          const number = String(b.number || '');
-          if (!number) continue;
-          if (q && !number.includes(q) && !String(b.nickname || '').includes(q)) continue;
-          const local = findAccountByNumber(number);
-          remoteBots.push({
-            number,
-            nickname: String(b.nickname || ''),
-            bio: String(b.bio || ''),
-            avatar: String(b.avatar || ''),
-            online: false,
-            added: local ? 1 : 0,
-            isFriend: local ? friendSet.has(local.id) : false,
-            isMine: false,
-            remote: true,
-            addr,
-            instance: String(body.instanceId || addr),
-          });
+    // 并行探测：串行会拖到 8 秒以上，广场是首页，首屏必须快
+    const probes = await Promise.all(
+      addrs.slice(0, 6).map(async (addr) => {
+        try {
+          const ctl = new AbortController();
+          const timer = setTimeout(() => ctl.abort(), 1200);
+          const resp = await fetch(`http://${addr}/api/federation/bots`, { signal: ctl.signal });
+          clearTimeout(timer);
+          if (!resp.ok) return null;
+          return { addr, body: await resp.json() };
+        } catch {
+          /* 某个实例连不上就跳过，不能让整个广场失败 */
+          return null;
         }
-      } catch {
-        /* 某个实例连不上就跳过，不能让整个广场失败 */
+      }),
+    );
+
+    const remoteBots = [];
+    for (const probe of probes) {
+      if (!probe) continue;
+      const { addr, body } = probe;
+      for (const b of Array.isArray(body.bots) ? body.bots : []) {
+        const number = String(b.number || '');
+        if (!number) continue;
+        const btags = Array.isArray(b.tags) ? b.tags.map(String) : [];
+        if (
+          q &&
+          !number.includes(q) &&
+          !String(b.nickname || '').includes(q) &&
+          !btags.some((t) => t.includes(q))
+        ) {
+          continue;
+        }
+        const local = findAccountByNumber(number);
+        remoteBots.push({
+          number,
+          nickname: String(b.nickname || ''),
+          bio: String(b.bio || ''),
+          avatar: String(b.avatar || ''),
+          tags: btags,
+          online: false,
+          added: local ? 1 : 0,
+          isFriend: local ? friendSet.has(local.id) : false,
+          isMine: false,
+          remote: true,
+          addr,
+          instance: String(body.instanceId || addr),
+        });
       }
     }
 
@@ -2774,9 +2856,10 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     }
     const parsed = z
       .object({
-        nickname: z.string().min(1).max(24).optional(),
+        nickname: z.string().trim().min(1).max(24).optional(),
         bio: z.string().max(200).optional(),
         public: z.boolean().optional(),
+        tags: tagsSchema.optional(),
       })
       .safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
@@ -2786,9 +2869,16 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
       `UPDATE accounts SET
          nickname = COALESCE(?, nickname),
          bio      = COALESCE(?, bio),
-         is_public = COALESCE(?, is_public)
+         is_public = COALESCE(?, is_public),
+         tags     = COALESCE(?, tags)
        WHERE id = ?`,
-    ).run(p.nickname ?? null, p.bio ?? null, p.public === undefined ? null : p.public ? 1 : 0, bot.id);
+    ).run(
+      p.nickname ?? null,
+      p.bio ?? null,
+      p.public === undefined ? null : p.public ? 1 : 0,
+      p.tags === undefined ? null : JSON.stringify(p.tags),
+      bot.id,
+    );
 
     return { ok: true };
   });
@@ -2805,6 +2895,8 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
         number: b.number,
         nickname: b.nickname,
         bio: b.bio,
+        avatar: b.avatar || '',
+        tags: parseTags(b.tags),
         public: !!b.is_public,
         token: b.access_token,
         online: onebot.isOnline(b.id),
@@ -3165,7 +3257,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
   app.get('/api/federation/bots', async () => {
     const rows = db
       .prepare(
-        "SELECT number, nickname, bio, avatar FROM accounts WHERE type = 'bot' AND is_public = 1 ORDER BY id DESC LIMIT 200",
+        "SELECT number, nickname, bio, avatar, tags FROM accounts WHERE type = 'bot' AND is_public = 1 ORDER BY id DESC LIMIT 200",
       )
       .all();
     return {
@@ -3176,6 +3268,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
         nickname: b.nickname || '',
         bio: b.bio || '',
         avatar: b.avatar || '',
+        tags: parseTags(b.tags),
         type: 'bot',
       })),
     };

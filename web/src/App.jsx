@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Auth from './views/Auth.jsx';
 import Shell from './views/Shell.jsx';
+import PlazaPage from './views/plaza/PlazaPage.jsx';
 import Icon from './ui/icons.jsx';
 import { Spinner, Toaster, toast } from './ui/primitives.jsx';
 import NetBanner from './ui/NetBanner.jsx';
@@ -80,6 +81,8 @@ export default function App() {
   const [account, setAccount] = useState(null);
   const [ready, setReady] = useState(false);
   const [adding, setAdding] = useState(false);
+  /* 未登录时先看广场，点了登录/注册才进表单 */
+  const [guestAuth, setGuestAuth] = useState(false);
   const [accounts, setAccounts] = useState(loadAccounts);
 
   useEffect(() => {
@@ -187,10 +190,22 @@ export default function App() {
   }
 
   if (!token || !account) {
+    if (!guestAuth) {
+      return (
+        <>
+          <WinControls />
+          <PlazaPage onLogin={() => setGuestAuth(true)} />
+          <Toaster />
+        </>
+      );
+    }
     return (
       <>
         <WinControls />
         <Auth {...authProps} />
+        <button type="button" className="auth-back-plaza" onClick={() => setGuestAuth(false)}>
+          <Icon name="back" size={15} /> 回广场逛逛
+        </button>
         <Toaster />
       </>
     );

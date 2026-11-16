@@ -8,10 +8,11 @@ import ContactsTab from './contacts/ContactsTab.jsx';
 import DiscoverTab from './discover/DiscoverTab.jsx';
 import Settings from './Settings.jsx';
 
+/* 广场是首页：打开就看见有哪些 Bot，再进消息 */
 const NAV = [
+  { id: 'plaza', icon: 'grid', label: '广场' },
   { id: 'chat', icon: 'chat', label: '消息' },
   { id: 'contacts', icon: 'friend', label: '联系人' },
-  { id: 'discover', icon: 'grid', label: '发现' },
   { id: 'me', icon: 'gear', label: '我的' },
 ];
 
@@ -25,7 +26,7 @@ const NOTICE_META = {
 export default function Shell({ token, me, accounts, theme, onTheme, font, onFont, onSwitchAccount, onAddAccount, onLogout, onBotSession }) {
   const isMobile = useIsMobile();
   const [meLive, setMeLive] = useState(me);
-  const [tab, setTab] = useState('chat');
+  const [tab, setTab] = useState('plaza');
   const [discoverView, setDiscoverView] = useState('plaza');
   const [convs, setConvs] = useState(null);
   const [notifs, setNotifs] = useState({ count: 0, items: [] });
@@ -112,7 +113,7 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
   useEffect(() => {
     const fe = typeof window !== 'undefined' ? window.fe : null;
     if (fe?.setBadge) { try { fe.setBadge(totalUnread); } catch { /* 忽略 */ } }
-    document.title = totalUnread > 0 ? '(' + totalUnread + ') Furry Everpony' : 'Furry Everpony';
+    document.title = totalUnread > 0 ? '(' + totalUnread + ') Everony' : 'Everony';
   }, [totalUnread]);
 
   useEffect(() => {
@@ -308,10 +309,10 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
         <div className="rail-foot">
           <button
             type="button"
-            className={'rail-btn rail-bot' + (tab === 'discover' ? ' on' : '')}
-            title="Bot 广场 / 我的 Bot"
-            aria-label="Bot 广场"
-            onClick={() => { setDiscoverView('plaza'); setTab('discover'); }}
+            className={'rail-btn rail-bot' + (tab === 'plaza' && discoverView === 'mine' ? ' on' : '')}
+            title="我的 Bot"
+            aria-label="我的 Bot"
+            onClick={() => { setDiscoverView('mine'); setTab('plaza'); }}
           >
             <Icon name="bot" size={20} />
           </button>
@@ -358,8 +359,15 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
         {tab === 'contacts' ? (
           <ContactsTab token={token} me={meLive} conversations={convs} onOpenConversation={openConversation} refreshConversations={refreshConversations} notifications={notifs} onOpenNotifications={openNotifications} />
         ) : null}
-        {tab === 'discover' ? (
-          <DiscoverTab token={token} me={meLive} initialView={discoverView} onBotSession={onBotSession} onOpenConversation={openConversation} />
+        {tab === 'plaza' ? (
+          <DiscoverTab
+            token={token}
+            me={meLive}
+            initialView={discoverView}
+            onBotSession={onBotSession}
+            onOpenConversation={openConversation}
+            onGoTab={setTab}
+          />
         ) : null}
         {tab === 'me' ? (
           <Settings

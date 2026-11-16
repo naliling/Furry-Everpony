@@ -230,6 +230,17 @@ function migrate(db) {
   if (!hasColumn(db, 'accounts', 'status')) {
     db.exec("ALTER TABLE accounts ADD COLUMN status TEXT NOT NULL DEFAULT 'online'");
   }
+  /* ---------- 纯网页版：邮箱登录 + 自选号码 + Bot 标签 ---------- */
+  if (!hasColumn(db, 'accounts', 'email')) {
+    db.exec('ALTER TABLE accounts ADD COLUMN email TEXT');
+  }
+  if (!hasColumn(db, 'accounts', 'tags')) {
+    db.exec("ALTER TABLE accounts ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'");
+  }
+  /* 邮箱唯一：老账号（号码登录时代建的）没有邮箱，NULL 不参与唯一约束 */
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email) WHERE email IS NOT NULL AND email <> ''",
+  );
   if (!hasColumn(db, 'friendships', 'group_id')) {
     db.exec('ALTER TABLE friendships ADD COLUMN group_id INTEGER');
   }

@@ -16,14 +16,17 @@ const FONTS = [
 ];
 
 const FEATURES = [
-  { icon: 'monitor', title: '本地优先', text: '账号和数据都在你自己的电脑里' },
-  { icon: 'wifi', title: '实例互联', text: '每个实例都能互相加好友、互相加 Bot' },
-  { icon: 'bot', title: 'Bot 与 OneBot', text: '接上 AstrBot，让 Bot 也来聊天' },
-  { icon: 'phone', title: '多端可用', text: '桌面窗口，手机浏览器扫码即用' },
+  { icon: 'grid', title: 'Bot 广场', text: '不用登录也能逛，看中就聊' },
+  { icon: 'bot', title: '自己的 Bot', text: '接上 AstrBot / Koishi / NoneBot2，人设记忆都在你自己那边' },
+  { icon: 'hash', title: '号码认人', text: '8–11 位自选号码，Bot 靠号码记住你' },
+  { icon: 'phone', title: '手机即用', text: '浏览器打开就能聊，还能加到桌面当应用' },
 ];
 
 export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
   const [mode, setMode] = useState('login');
+  /* 登录：一个输入框吃「邮箱 或 号码」；注册：邮箱 + 自选号码 */
+  const [identifier, setIdentifier] = useState('');
+  const [email, setEmail] = useState('');
   const [number, setNumber] = useState('');
   const [password, setPassword] = useState('');
   const [password2, setPassword2] = useState('');
@@ -38,7 +41,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
   const [serverBusy, setServerBusy] = useState(false);
   const [serverInfo, setServerInfo] = useState(null);
   const [lanServers, setLanServers] = useState([]);
-  const numberRef = useRef(null);
+  const emailRef = useRef(null);
 
   const probeServer = async (base) => {
     setServerBusy(true);
@@ -82,7 +85,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
   useEffect(() => {
     if (mode !== 'register') return undefined;
     const n = number.trim();
-    if (n.length < 5 || n.length > 12) {
+    if (!/^[1-9]\d{7,10}$/.test(n)) {
       setCheck(null);
       return undefined;
     }
@@ -105,25 +108,25 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
     };
   }, [number, mode, serverInfo]);
 
-  const onNumber = (v) => setNumber(v.replace(/\D/g, '').slice(0, 12));
+  const onNumber = (v) => setNumber(v.replace(/\D/g, '').replace(/^0+/, '').slice(0, 11));
 
   const submit = async (e) => {
     e.preventDefault();
     if (busy) return;
     setError('');
-    const n = number.trim();
-    if (!/^\d{5,12}$/.test(n)) {
-      setError('号码是 5–12 位数字');
-      return;
-    }
     if (mode === 'login') {
+      const id = identifier.trim();
+      if (!id) {
+        setError('请输入邮箱');
+        return;
+      }
       if (!password) {
         setError('请输入密码');
         return;
       }
       setBusy(true);
       try {
-        const data = await api('/api/login', { method: 'POST', body: { number: n, password } });
+        const data = await api('/api/login', { method: 'POST', body: { identifier: id, password } });
         rememberAccount(data.account, data.token);
         onAuthed(data);
       } catch (err) {
@@ -131,6 +134,16 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
       } finally {
         setBusy(false);
       }
+      return;
+    }
+    const mail = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
+      setError('邮箱格式不对');
+      return;
+    }
+    const n = number.trim();
+    if (!/^[1-9]\d{7,10}$/.test(n)) {
+      setError('号码是 8–11 位数字，不能以 0 开头');
       return;
     }
     if (nickname.trim().length < 1) {
@@ -153,7 +166,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
     try {
       const data = await api('/api/register', {
         method: 'POST',
-        body: { number: n, nickname: nickname.trim(), password },
+        body: { email: mail, number: n, nickname: nickname.trim(), password },
       });
       rememberAccount(data.account, data.token);
       onAuthed(data);
@@ -192,8 +205,8 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
             <Icon name="chat" size={22} />
           </span>
           <div className="auth-brand-text">
-            <strong>Furry Everpony</strong>
-            <span>自托管 · 去中心化即时通讯</span>
+            <strong>Everony</strong>
+            <span>Bot 广场 · 网页即开即聊</span>
           </div>
         </div>
 
@@ -204,7 +217,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
             <br />
             放回<span className="grad-text">你自己的电脑</span>
           </h1>
-          <p>一个实例就是一个世界。数据不经过别人的服务器，朋友之间直接互联。</p>
+          <p>一台服务器，一个地址，所有人打开就能聊。角色和 Bot 都摆在广场上。</p>
         </div>
 
         <ul className="auth-features">
@@ -247,7 +260,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
               <span className="auth-tab-glider" data-mode={mode} />
             </div>
             <p className="auth-card-sub">
-              {mode === 'login' ? '欢迎回来，用你的号码继续。' : '选一个 5–12 位号码，这就是你的身份。'}
+              {mode === 'login' ? '欢迎回来，用注册时的邮箱继续。' : '邮箱注册，再挑一个 8–11 位号码当公开身份。'}
             </p>
           </header>
 
@@ -311,27 +324,63 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
           ) : null}
 
           <form className="auth-form" onSubmit={submit}>
-            <label className="field">
-              <span className="field-label">号码</span>
-              <div className={'input-wrap' + (check && mode === 'register' ? (check.available ? ' ok' : ' bad') : '')}>
-                <Icon name="hash" size={17} className="input-icon" />
-                <input
-                  ref={numberRef}
-                  className="input input-number"
-                  inputMode="numeric"
-                  autoComplete="username"
-                  placeholder="例如 10001"
-                  value={number}
-                  onChange={(e) => onNumber(e.target.value)}
-                  maxLength={12}
-                />
-                {mode === 'register' && number.length >= 5 ? (
-                  <span className="input-tail">
-                    {checking ? <Spinner size={14} /> : check ? <span className={check.available ? 'ok-text' : 'bad-text'}>{check.available ? '可用' : '已占用'}</span> : null}
-                  </span>
-                ) : null}
-              </div>
-            </label>
+            {mode === 'login' ? (
+              <label className="field">
+                <span className="field-label">邮箱</span>
+                <div className="input-wrap">
+                  <Icon name="mail" size={17} className="input-icon" />
+                  <input
+                    ref={emailRef}
+                    className="input"
+                    autoComplete="username"
+                    spellCheck={false}
+                    placeholder="注册时填的邮箱（老账号也可以直接填号码）"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                  />
+                </div>
+              </label>
+            ) : (
+              <label className="field">
+                <span className="field-label">邮箱</span>
+                <div className="input-wrap">
+                  <Icon name="mail" size={17} className="input-icon" />
+                  <input
+                    ref={emailRef}
+                    className="input"
+                    type="email"
+                    autoComplete="username"
+                    spellCheck={false}
+                    placeholder="用来登录，不会公开给别人看"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+              </label>
+            )}
+
+            {mode === 'register' ? (
+              <label className="field">
+                <span className="field-label">号码 <span className="field-hint">8–11 位，注册后固定不变，别人和 Bot 都靠它认你</span></span>
+                <div className={'input-wrap' + (check ? (check.available ? ' ok' : ' bad') : '')}>
+                  <Icon name="hash" size={17} className="input-icon" />
+                  <input
+                    className="input input-number"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="例如 3881756548"
+                    value={number}
+                    onChange={(e) => onNumber(e.target.value)}
+                    maxLength={11}
+                  />
+                  {number.length >= 8 ? (
+                    <span className="input-tail">
+                      {checking ? <Spinner size={14} /> : check ? <span className={check.available ? 'ok-text' : 'bad-text'}>{check.available ? '可用' : '已占用'}</span> : null}
+                    </span>
+                  ) : null}
+                </div>
+              </label>
+            ) : null}
 
             {mode === 'register' ? (
               <label className="field">
@@ -372,7 +421,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
 
             <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={busy}>
               {busy ? <Spinner size={16} /> : <Icon name={mode === 'login' ? 'arrowRight' : 'plus'} size={18} />}
-              {mode === 'login' ? '进入 Everpony' : '创建我的号码'}
+              {mode === 'login' ? '进入 Everony' : '创建我的账号'}
             </button>
           </form>
 

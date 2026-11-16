@@ -300,6 +300,12 @@ public final class Api {
     }
     return false;
   }
+  /* 能不能开私聊：好友可以；公开 Bot 不用加好友，想聊就聊 */
+  private boolean canOpenDm(long meId, Map<String, Object> target) {
+    if (areFriends(meId, num(target, "id"))) return true;
+    return "bot".equals(str(target, "type")) && num(target, "is_public") == 1;
+  }
+
 
   private boolean isBlocked(long a, long b) {
     for (Map<String, Object> f : where("blocks", "a_id", a)) {
@@ -1433,7 +1439,7 @@ public final class Api {
         Map<String, Object> t = accountByNumber(number);
         if (t == null) { res.error(404, "没有这个号码"); return; }
         if (num(t, "id") == num(me, "id")) { res.error(400, "不能和自己聊"); return; }
-        if (!areFriends(num(me, "id"), num(t, "id"))) { res.error(403, "还不是好友，先加好友"); return; }
+        if (!canOpenDm(num(me, "id"), t)) { res.error(403, "还不是好友，先加好友"); return; }
         store.save();
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         out.put("conversationId", getOrCreateDm(num(me, "id"), num(t, "id")));
@@ -1501,7 +1507,7 @@ public final class Api {
         Map<String, Object> t = accountByNumber(to);
         if (t == null) { res.error(404, "没有这个号码"); return; }
         if (num(t, "id") == num(me, "id")) { res.error(400, "不能给自己发"); return; }
-        if (!areFriends(num(me, "id"), num(t, "id"))) { res.error(403, "还不是好友，先加好友"); return; }
+        if (!canOpenDm(num(me, "id"), t)) { res.error(403, "还不是好友，先加好友"); return; }
         Map<String, Object> data = parseInput(b);
         if (data.containsKey("error")) { res.error(400, String.valueOf(data.get("error"))); return; }
         long convId = getOrCreateDm(num(me, "id"), num(t, "id"));
