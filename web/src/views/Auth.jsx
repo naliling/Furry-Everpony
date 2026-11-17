@@ -243,7 +243,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
         </div>
 
         <div className="auth-hero-copy">
-          <span className="auth-eyebrow">Everony · 自托管聊天</span>
+          <span className="auth-eyebrow">Everony · 网页聊天</span>
           <h1>
             把聊天
             <br />
@@ -281,7 +281,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
       <main className="auth-main">
         <div className="auth-card glass">
           <header className="auth-card-head">
-            <span className="auth-card-eyebrow">Everony · 自托管聊天</span>
+            <span className="auth-card-eyebrow">Everony · 网页聊天</span>
             <div className="auth-tabs" role="tablist">
               <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
                 登录
