@@ -37,6 +37,8 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
     const el = stageRef.current;
     if (!el) return undefined;
     const onWheel = (e) => {
+      // 普通滚轮留给浏览器滚动长图（之前无条件 preventDefault，长图只能看第一屏、滚不动）
+      if (!e.ctrlKey) return;
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       const mx = e.clientX - rect.left - rect.width / 2;
@@ -73,6 +75,10 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
 
   const onPointerDown = (e) => {
     if (e.button !== 0) return;
+    if (scale <= 1) {
+      gesture.current = { mode: 'swipe', sx: e.clientX, sy: e.clientY };
+      return;
+    }
     gesture.current = { mode: 'drag', sx: e.clientX, sy: e.clientY, ox: offset.x, oy: offset.y };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
@@ -90,43 +96,12 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
   const onPointerUp = (e) => {
     const g = gesture.current;
     gesture.current = null;
-    if (!g || scale > 1) return;
+    if (!g || g.mode !== 'swipe') return;
     const dx = e.clientX - g.sx;
-    if (Math.abs(dx) > 60 && Math.abs(e.clientY - g.sy) < 80) {
+    const dy = e.clientY - g.sy;
+    // 只把「横向为主」的滑动当翻页，纵向留给原生滚动看长图
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) {
       changeIndex(dx > 0 ? index - 1 : index + 1);
-    }
-  };
-
-  const onTouchStart = (e) => {
-    if (e.touches.length === 2) {
-      const [a, b] = e.touches;
-      gesture.current = {
-        mode: 'pinch',
-        dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
-        scale,
-      };
-    } else if (e.touches.length === 1 && scale === 1) {
-      gesture.current = { mode: 'swipe', sx: e.touches[0].clientX, sy: e.touches[0].clientY };
-    }
-  };
-
-  const onTouchMove = (e) => {
-    const g = gesture.current;
-    if (!g) return;
-    if (g.mode === 'pinch' && e.touches.length === 2) {
-      const [a, b] = e.touches;
-      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-      setScale(clampScale((g.scale * dist) / Math.max(1, g.dist)));
-    }
-  };
-
-  const onTouchEnd = (e) => {
-    const g = gesture.current;
-    gesture.current = null;
-    if (g && g.mode === 'swipe' && e.changedTouches.length) {
-      const t = e.changedTouches[0];
-      const dx = t.clientX - g.sx;
-      if (Math.abs(dx) > 60 && Math.abs(t.clientY - g.sy) < 90) changeIndex(dx > 0 ? index - 1 : index + 1);
     }
   };
 
@@ -188,9 +163,6 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
           if (scale > 1) reset();
           else setScale(2.4);
         }}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
       >
         <img
           key={index}
@@ -215,7 +187,6 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
           </button>
         </>
       ) : null}
-      <div className="imgviewer-hint">滚轮缩放 · 拖拽移动 · 左右键切换</div>
     </div>,
     document.body
   );

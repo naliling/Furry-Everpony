@@ -1,3 +1,16 @@
+# v2026.11.17.0.10.28 — 2026-11-17
+
+## 删掉聊天右侧浮动菜单 + 图片查看器能滚长图 + 群聊不再显示「正在思考」
+
+- 删除 `web/src/views/chat/ChatPanel.jsx` 里整块 `<aside className="chat-quick">`：私聊的「置顶/免打扰/资料」和群聊的「成员/公告/设置」都不再渲染（用户两次明确要求删掉，不是修）。实测 DOM 里 `.chat-quick` 数量：私聊 0、群聊 0。
+- 图片查看器 `web/src/ui/ImageViewer.jsx`：
+  - 滚轮不再无条件 `preventDefault`（之前把长图锁在第一屏、滚不动），普通滚轮现在滚长图，Ctrl+滚轮才缩放。
+  - 移除与 pointer 重复的 touch 手势（单指滑动被吃成翻页），改为 pointer 判定：横向为主才翻页，纵向交给原生滚动。
+  - 删除常驻提示「滚轮缩放 · 拖拽移动 · 左右键切换」。
+  - CSS `.imgviewer-stage` 改 flex + `align-items: safe center` + `touch-action: pan-y`。
+  - 实测：长图 900×4605 在 1440×900 查看器里 stage 高 842、scrollHeight 4637，可滚到任意位置。
+- 群聊不再显示「正在思考…」或任何输入状态：`typingLabel` 加 `!isGroup`，Bot 与个人统一「正在输入…」。
+
 # v2026.11.17.0.10.27 — 2026-11-17
 
 ## 消息不再偏移 + 图片放大到 720 + 背景无色差

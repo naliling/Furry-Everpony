@@ -1485,17 +1485,20 @@
 .imgviewer-stage {
   flex: 1;
   min-height: 0;
-  display: grid;
-  place-items: start center;
+  display: flex;
+  align-items: safe center;
+  justify-content: center;
   overflow: auto;
   overscroll-behavior: contain;
   padding: 8px 56px 24px;
   cursor: grab;
+  touch-action: pan-y;
 }
 .imgviewer-stage:active {
   cursor: grabbing;
 }
 .imgviewer-stage img {
+  display: block;
   max-width: 100%;
   max-height: none;
   border-radius: 10px;
@@ -1528,14 +1531,6 @@
 .imgviewer-nav.next {
   right: 12px;
 }
-.imgviewer-hint {
-  flex: none;
-  padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px));
-  text-align: center;
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 0.72rem;
-}
-
 /* ---------- 手机聊天细节 ---------- */
 @media (max-width: 779px) {
   .chat-back {

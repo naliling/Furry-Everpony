@@ -485,9 +485,8 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
   const typingPrefix = typingNames.length
     ? (isMobile ? (isGroup ? typingNames[0] + ' ' : '') : typingNames.slice(0, 2).join('、') + ' ')
     : '';
-  /* Bot 生成要十几秒，说「正在输入」会让人以为对面在打字；对 Bot 说「正在思考」更准 */
-  const typingVerb = typingShown.length && typingShown.every((t) => t.type === 'bot') ? '正在思考…' : '正在输入…';
-  const typingLabel = typingNames.length ? typingPrefix + typingVerb : '';
+  /* 用户 2026-11-17：Bot 和个人号一律「正在输入…」，不许出现「正在思考」；群聊里完全不显示 */
+  const typingLabel = !isGroup && typingNames.length ? typingPrefix + '正在输入…' : '';
   // 群详情里的 members 正常是人数；万一某个服务端回的是成员数组，这里也要算对，不能拼成 [object Object]
   const groupMemberCount = Array.isArray(detail?.members) ? detail.members.length : Number(detail?.members || 0);
   const subtitle = isGroup
@@ -497,7 +496,7 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
   const announceUnread = isGroup && groupMeta.announcement && Number(groupMeta.announcement_updated_at || 0) > Number(detail?.announcement_read_at || 0) && announceDismissed === 0;
 
   /* 头部副标题：有人在输入时换成 3 个跳动点 + 昵称，和在线状态文字不打架 */
-  const headSub = typingShown.length ? (
+  const headSub = typingLabel ? (
     <>
       <span className="typing-dots" aria-hidden><i /><i /><i /></span>
       <span className="chat-head-sub-text">{typingLabel}</span>
@@ -517,7 +516,7 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
             <Avatar number={groupNumber} nickname={title} avatar={detail?.group?.avatar || detail?.avatar || conversation?.group?.avatar} square size={38} />
             <span className="chat-head-text">
               <b>{title}</b>
-              <span className={'chat-head-sub' + (typingShown.length ? ' typing' : '')}>{headSub}</span>
+              <span className={'chat-head-sub' + (typingLabel ? ' typing' : '')}>{headSub}</span>
             </span>
           </button>
         ) : (
@@ -525,7 +524,7 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
             <Avatar number={conversation?.peer?.number} nickname={title} avatar={conversation?.peer?.avatar} size={38} status={peerStatus} />
             <span className="chat-head-text">
               <b>{title}</b>
-              <span className={'chat-head-sub' + (typingShown.length ? ' typing' : '')}>{headSub}</span>
+              <span className={'chat-head-sub' + (typingLabel ? ' typing' : '')}>{headSub}</span>
             </span>
           </button>
         )}
@@ -639,7 +638,7 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
         </button>
       ) : null}
 
-      {typingShown.length && atBottom ? (
+      {typingLabel && atBottom ? (
         <div className="typing-line" aria-live="polite">
           <span className="typing-dots" aria-hidden><i /><i /><i /></span>
           <span className="typing-line-text">{typingLabel}</span>
@@ -660,21 +659,7 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
         disabledReason={disabledReason}
       />
 
-      <aside className="chat-quick">
-        {isGroup ? (
-          <>
-            <button type="button" className="chat-quick-item" onClick={() => openGroupInfo('members')}><Icon name="users" size={16} /> 成员</button>
-            <button type="button" className="chat-quick-item" onClick={() => openGroupInfo('announcement')}><Icon name="bell" size={16} /> 公告</button>
-            <button type="button" className="chat-quick-item" onClick={() => openGroupInfo('settings')}><Icon name="gear" size={16} /> 设置</button>
-          </>
-        ) : (
-          <>
-            <button type="button" className="chat-quick-item" onClick={togglePin}><Icon name="pin" size={16} /> 置顶</button>
-            <button type="button" className="chat-quick-item" onClick={toggleMute}><Icon name="mute" size={16} /> 免打扰</button>
-            <button type="button" className="chat-quick-item" onClick={() => setProfile(conversation?.peer?.number)}><Icon name="friend" size={16} /> 资料</button>
-          </>
-        )}
-      </aside>
+      {/* 聊天页右侧的浮动快捷菜单整块删除（用户 2026-11-17 两次明确要求：私聊和群聊都不要，不是修） */}
 
       {viewer ? <ImageViewer items={viewer.items} index={viewer.index} onIndex={(i) => setViewer((v) => ({ ...v, index: i }))} onClose={() => setViewer(null)} /> : null}
       {chatBgOpen ? <ChatBgPanel onClose={() => setChatBgOpen(false)} /> : null}
