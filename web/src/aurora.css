@@ -171,3 +171,13 @@
   --bubble-mine: linear-gradient(135deg, rgba(74,134,255,.82), rgba(123,91,255,.8)) !important;
 }
 .msg-bubble { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+
+/* ===== v0.10.37 浮层退出动画：与打开对称的 0.62s 淡出缩小/滑出 ===== */
+.overlay.is-closing { animation: fe-fade-out 620ms cubic-bezier(.4,0,.7,.3) forwards !important; pointer-events: none; }
+.overlay.is-closing .modal { animation: fe-pop-out 620ms cubic-bezier(.4,0,.7,.3) forwards !important; }
+.overlay.is-closing .drawer { animation: fe-drawer-out 620ms cubic-bezier(.4,0,.7,.3) forwards !important; }
+@keyframes fe-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes fe-pop-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(10px) scale(.98); } }
+@keyframes fe-drawer-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(30px); } }
+/* 图片查看器同样有退出动画 */
+.imgviewer.is-closing { animation: fe-fade-out 620ms cubic-bezier(.4,0,.7,.3) forwards !important; pointer-events: none; }

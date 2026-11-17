@@ -40,7 +40,6 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
   const [accountList, setAccountList] = useState(() => loadAccounts());
   /* 站点门禁：注册要不要邀请码 / 邮箱验证码，由站长在后台配 */
   const [site, setSite] = useState(null);
-  const [invite, setInvite] = useState('');
   const [emailCode, setEmailCode] = useState('');
   const [codeBusy, setCodeBusy] = useState(false);
   const [codeSent, setCodeSent] = useState('');
@@ -69,8 +68,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const gate = site && site.registerGate ? site.registerGate : 'both';
-  const needInvite = gate === 'invite' || gate === 'both';
+  const gate = site && site.registerGate ? site.registerGate : 'email';
   const needEmailCode = gate === 'email' || gate === 'both';
   const canEmailCode = !!(site && site.smtpReady);
 
@@ -180,8 +178,8 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
       setError('请输入图片里的验证码');
       return;
     }
-    if (needInvite && !invite.trim() && !(needEmailCode && canEmailCode && emailCode.trim())) {
-      setError(canEmailCode ? '填邮箱验证码，或者找站主要一个邀请码' : '这个站要邀请码才能注册，找站主要一个');
+    if (needEmailCode && !emailCode.trim()) {
+      setError(canEmailCode ? '先填邮箱验证码' : '本站发信服务还没配好，联系站长');
       return;
     }
     setBusy(true);
@@ -195,7 +193,6 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
           password,
           captchaId: captcha.id,
           captcha: captchaCode.trim(),
-          ...(invite.trim() ? { invite: invite.trim().toUpperCase() } : {}),
           ...(emailCode.trim() ? { emailCode: emailCode.trim() } : {}),
         },
       });
@@ -290,8 +287,8 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
               {mode === 'login'
                 ? '填号码或邮箱进来。号码可以填你常用的号，Bot 就能在这里认出你。'
                 : site === false
-                  ? '这个站暂时读不到注册配置，先找站主要个邀请码试试。'
-                  : '填邮箱和号码，再挑一个 8–11 位号码当公开身份。'} 
+                  ? '这个站暂时读不到注册配置，联系站长。'
+                  : '填邮箱收验证码，再挑一个 8–11 位号码当公开身份。'} 
             </p>
           </header>
 
@@ -441,25 +438,6 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
                   </button>
                 </div>
                 {codeSent ? <span className="field-hint">已经发到 {codeSent}，去邮箱里翻一下（也在垃圾箱看看）。</span> : null}
-              </label>
-            ) : null}
-
-            {mode === 'register' && needInvite ? (
-              <label className="field">
-                <span className="field-label">邀请码 <span className="field-hint">找站主要一个，或者用朋友的</span></span>
-                <div className="input-wrap">
-                  <Icon name="star" size={17} className="input-icon" />
-                  <input
-                    className="input"
-                    autoComplete="off"
-                    spellCheck={false}
-                    maxLength={16}
-                    placeholder="8 位字母数字"
-                    value={invite}
-                    onChange={(e) => setInvite(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, ''))}
-                  />
-                </div>
-                {needEmailCode && canEmailCode ? <span className="field-hint">有邮箱验证码的话，这一栏可以空着。</span> : null}
               </label>
             ) : null}
 
