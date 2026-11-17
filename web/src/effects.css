@@ -673,3 +673,44 @@ html[data-desktop='1'] .net-banner { top: 34px; }
   .merge-item-forward,
   .chatbg-settings-link { transition: none; }
 }
+
+/* ===== v0.10.38：全站浮层可见的进/出动画（手机+浅色主题同样生效） ===== */
+/* 打开动画：所有浮层统一 0.6s 优雅淡入 */
+.overlay:not(.is-closing) { animation: fe-overlay-in 600ms cubic-bezier(.22,.61,.36,1) both !important; }
+.overlay .modal:not(.is-closing) { animation: fe-modal-in 600ms cubic-bezier(.22,.61,.36,1) both !important; }
+.overlay .drawer:not(.is-closing) { animation: fe-drawer-in 600ms cubic-bezier(.22,.61,.36,1) both !important; }
+.ctx-layer:not(.is-closing) .ctx-menu, .ctx-layer:not(.is-closing) .ctx-sheet { animation: fe-menu-in 520ms cubic-bezier(.22,.61,.36,1) both !important; }
+.imgviewer:not(.is-closing) { animation: fe-overlay-in 600ms cubic-bezier(.22,.61,.36,1) both !important; }
+
+/* 关闭动画：0.6s 淡出，肉眼清楚可见 */
+.overlay.is-closing { animation: fe-overlay-out 600ms cubic-bezier(.4,0,.7,.3) forwards !important; pointer-events: none; }
+.overlay.is-closing .modal { animation: fe-modal-out 600ms cubic-bezier(.4,0,.7,.3) forwards !important; }
+.overlay.is-closing .drawer { animation: fe-drawer-out2 600ms cubic-bezier(.4,0,.7,.3) forwards !important; }
+.ctx-layer.is-closing { animation: fe-overlay-out 520ms forwards !important; pointer-events: none; }
+.ctx-layer.is-closing .ctx-menu, .ctx-layer.is-closing .ctx-sheet { animation: fe-menu-out 520ms cubic-bezier(.4,0,.7,.3) forwards !important; }
+.imgviewer.is-closing { animation: fe-overlay-out 600ms forwards !important; pointer-events: none; }
+
+@keyframes fe-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fe-overlay-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes fe-modal-in { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes fe-modal-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(14px) scale(.97); } }
+@keyframes fe-drawer-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@keyframes fe-drawer-out2 { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(28px); } }
+@keyframes fe-menu-in { from { opacity: 0; transform: scale(.94) translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes fe-menu-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.94) translateY(-6px); } }
+
+/* 侧边栏切换动画：主内容区与侧栏按钮状态平滑过渡 */
+.app-main > * { animation: fe-page-in2 620ms cubic-bezier(.22,.61,.36,1) both !important; }
+@keyframes fe-page-in2 { from { opacity: 0; transform: translate3d(0, 10px, 0); } to { opacity: 1; transform: none; } }
+.rail-btn, .mobile-tab { transition: transform 560ms cubic-bezier(.22,.61,.36,1), background 560ms, color 560ms !important; }
+.rail-btn.on, .mobile-tab.on { animation: fe-rail-pop 600ms cubic-bezier(.22,.61,.36,1) both; }
+@keyframes fe-rail-pop { 0% { transform: scale(.9); } 60% { transform: scale(1.08); } 100% { transform: none; } }
+
+/* 手机端不再屏蔽：覆盖 pages.css 的旧规则（本文件在 pages 之后加载） */
+@media (max-width: 779px) {
+  .overlay, .overlay .modal, .overlay .drawer, .ctx-menu, .ctx-sheet {
+    animation-duration: 600ms !important;
+  }
+}
+/* 浅色主题同样保留动画（只换配色不换动画） */
+:root[data-theme='light'] .overlay, :root[data-theme='light'] .modal { animation-duration: 600ms !important; }

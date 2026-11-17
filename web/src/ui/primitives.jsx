@@ -194,7 +194,8 @@ export function ContextMenu({ x, y, items, onClose, title }) {
   const ref = useRef(null);
   const isMobile = useIsMobile();
   const [pos, setPos] = useState(null);
-  useOverlay(onClose);
+  const { closing, beginClose } = useOverlayClose(onClose, 520);
+  useOverlay(beginClose);
 
   useLayoutEffect(() => {
     if (isMobile) return;
@@ -209,21 +210,21 @@ export function ContextMenu({ x, y, items, onClose, title }) {
 
   useEffect(() => {
     if (!isMobile) return undefined;
-    const close = () => onClose();
+    const close = () => beginClose();
     return () => close;
   }, [isMobile, onClose]);
 
   const usable = items.filter(Boolean);
   const body = (
     <div
-      className={cx('ctx-layer', isMobile && 'ctx-layer-mobile')}
+      className={cx('ctx-layer', isMobile && 'ctx-layer-mobile', closing && 'is-closing')}
       onContextMenu={(e) => e.preventDefault()}
-      onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onPointerDown={(e) => { if (e.target === e.currentTarget) beginClose(); }}
     >
-      {isMobile ? <div className="ctx-mask" onPointerDown={onClose} /> : null}
+      {isMobile ? <div className="ctx-mask" onPointerDown={beginClose} /> : null}
       <div
         ref={ref}
-        className={cx('ctx-menu', isMobile && 'ctx-sheet')}
+        className={cx('ctx-menu', isMobile && 'ctx-sheet', closing && 'is-closing')}
         style={!isMobile && pos ? { left: pos.left + 'px', top: pos.top + 'px' } : undefined}
         role="menu"
         onPointerDown={(e) => e.stopPropagation()}
@@ -242,7 +243,7 @@ export function ContextMenu({ x, y, items, onClose, title }) {
               disabled={item.disabled}
               onClick={() => {
                 if (item.disabled) return;
-                onClose();
+                beginClose();
                 item.onClick?.();
               }}
             >
