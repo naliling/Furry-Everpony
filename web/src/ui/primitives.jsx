@@ -44,6 +44,22 @@ export function installBackHandler() {
   };
 }
 
+/**
+ * 浮层退出动画：先播 0.6s 淡出缩小，播完再真正卸载 DOM，避免关闭瞬间消失/掉帧。
+ * Esc / 安卓返回 / 点遮罩 / 点关闭 都走 beginClose，保证开关动画对称。
+ */
+export function useOverlayClose(onClose, duration = 620) {
+  const [closing, setClosing] = useState(false);
+  const timer = useRef(null);
+  const start = () => {
+    if (closing) return;
+    setClosing(true);
+    timer.current = setTimeout(() => onClose(), duration);
+  };
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  return { closing, beginClose: start };
+}
+
 export function useOverlay(onClose, enabled = true) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -276,10 +292,11 @@ export function useLongPress(onLongPress, delay = 460) {
 
 /* ---------- 弹窗 ---------- */
 export function Modal({ title, subtitle, icon, children, footer, onClose, width = 480, className = '', headerExtra, closeOnMask = true }) {
-  useOverlay(onClose);
+  const { closing, beginClose } = useOverlayClose(onClose);
+  useOverlay(beginClose);
   return createPortal(
-    <div className="overlay" onPointerDown={(e) => { if (closeOnMask && e.target === e.currentTarget) onClose(); }}>
-      <div className={cx('modal', className)} style={{ maxWidth: width }} role="dialog" aria-modal="true" aria-label={title || '对话框'}>
+    <div className={cx('overlay', closing && 'is-closing')} onPointerDown={(e) => { if (closeOnMask && e.target === e.currentTarget) beginClose(); }}>
+      <div className={cx('modal', className, closing && 'is-closing')} style={{ maxWidth: width }} role="dialog" aria-modal="true" aria-label={title || '对话框'}>
         {title ? (
           <header className="modal-head">
             <div className="modal-head-main">
@@ -291,7 +308,7 @@ export function Modal({ title, subtitle, icon, children, footer, onClose, width 
             </div>
             <div className="modal-head-extra">
               {headerExtra}
-              <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭">
+              <button type="button" className="icon-btn" onClick={beginClose} aria-label="关闭">
                 <Icon name="close" size={18} />
               </button>
             </div>
@@ -306,13 +323,14 @@ export function Modal({ title, subtitle, icon, children, footer, onClose, width 
 }
 
 export function Drawer({ title, subtitle, onClose, children, footer, width = 420, className = '', icon }) {
-  useOverlay(onClose);
+  const { closing, beginClose } = useOverlayClose(onClose);
+  useOverlay(beginClose);
   const isMobile = useIsMobile();
   return createPortal(
-    <div className="overlay overlay-drawer" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <aside className={cx('drawer', className)} style={!isMobile ? { width } : undefined} role="dialog" aria-modal="true" aria-label={title || '抽屉'}>
+    <div className={cx('overlay', 'overlay-drawer', closing && 'is-closing')} onPointerDown={(e) => { if (e.target === e.currentTarget) beginClose(); }}>
+      <aside className={cx('drawer', className, closing && 'is-closing')} style={!isMobile ? { width } : undefined} role="dialog" aria-modal="true" aria-label={title || '抽屉'}>
         <header className="drawer-head">
-          <button type="button" className="icon-btn drawer-back" onClick={onClose} aria-label="返回">
+          <button type="button" className="icon-btn drawer-back" onClick={beginClose} aria-label="返回">
             <Icon name="back" size={20} />
           </button>
           <div className="drawer-title">
@@ -322,7 +340,7 @@ export function Drawer({ title, subtitle, onClose, children, footer, width = 420
               {subtitle ? <p>{subtitle}</p> : null}
             </div>
           </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭">
+          <button type="button" className="icon-btn" onClick={beginClose} aria-label="关闭">
             <Icon name="close" size={18} />
           </button>
         </header>

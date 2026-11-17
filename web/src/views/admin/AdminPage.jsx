@@ -38,9 +38,9 @@ const MODES = [
 ];
 
 const GATES = [
-  { id: 'both', label: '邮箱码或邀请码', hint: '配了发信就发验证码，没配就走邀请码' },
+  { id: 'email', label: '只认邮箱码', hint: '必须填自己邮箱收到的验证码（推荐）' },
+  { id: 'both', label: '邮箱码或邀请码', hint: '配了发信就发验证码，也能用邀请码' },
   { id: 'invite', label: '只认邀请码', hint: '只有拿到邀请码的人能注册' },
-  { id: 'email', label: '只认邮箱码', hint: '必须填自己邮箱收到的验证码' },
   { id: 'none', label: '都不要', hint: '谁都能注册（不推荐，容易被刷）' },
 ];
 
@@ -77,7 +77,7 @@ export default function AdminPage({ token, me }) {
   const [newReason, setNewReason] = useState('');
   const [busy, setBusy] = useState('');
   const [siteCfg, setSiteCfg] = useState(null);
-  const [gate, setGate] = useState('both');
+  const [gate, setGate] = useState('email');
   const [retention, setRetention] = useState(14);
   const [smtp, setSmtp] = useState({ host: '', port: 465, secure: true, user: '', pass: '', from: '', fromName: '' });
   const [donation, setDonation] = useState({ link: '', images: [] });
@@ -557,6 +557,12 @@ export default function AdminPage({ token, me }) {
             <span className={'admin-tag ' + (siteCfg && siteCfg.smtpReady ? 'ok' : 'danger')}>
               {siteCfg && siteCfg.smtpReady ? '已就绪' : '未配置'}
             </span>
+          </div>
+          <div className="admin-toolbar">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSmtp((s) => ({ ...s, host: 'smtp.qq.com', port: 465, secure: true, from: s.user || smtp.user, fromName: 'Everony' }))}>
+              <Icon name="mail" size={14} /> 一键填好 QQ 邮箱参数
+            </button>
+            <span className="admin-inline-hint">填完只需再填 QQ 邮箱「授权码」（不是登录密码），点保存 → 试发一封验证。</span>
           </div>
           <div className="admin-form">
             <label className="field">

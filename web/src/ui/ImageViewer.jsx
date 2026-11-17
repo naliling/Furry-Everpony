@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from './icons.jsx';
-import { useOverlay } from './primitives.jsx';
+import { useOverlay, useOverlayClose } from './primitives.jsx';
 
 const clampScale = (v) => Math.min(6, Math.max(0.5, v));
 
@@ -11,7 +11,8 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
   const stageRef = useRef(null);
   const gesture = useRef(null);
   const session = useRef(0);
-  useOverlay(onClose);
+  const { closing, beginClose } = useOverlayClose(onClose);
+  useOverlay(beginClose);
 
   const item = items[index] || null;
   const current = session.current;
@@ -125,7 +126,7 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
   if (!item) return null;
 
   return createPortal(
-    <div className="imgviewer" role="dialog" aria-modal="true" aria-label="图片查看器">
+    <div className={('imgviewer' + (closing ? ' is-closing' : ''))} role="dialog" aria-modal="true" aria-label="图片查看器">
       <div className="imgviewer-top">
         <span className="imgviewer-count">
           {index + 1} / {items.length}
@@ -144,7 +145,7 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
           <button type="button" className="icon-btn" aria-label="下载" onClick={download}>
             <Icon name="download" size={18} />
           </button>
-          <button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}>
+          <button type="button" className="icon-btn" aria-label="关闭" onClick={beginClose}>
             <Icon name="close" size={20} />
           </button>
         </div>
