@@ -49,9 +49,9 @@ export default function PlazaPage({ onLogin }) {
       <div className="plaza-glow" aria-hidden />
       <header className="plaza-top">
         <div className="plaza-brand">
-          <span className="plaza-brand-mark"><Icon name="starFilled" size={19} /></span>
+          <span className="plaza-brand-mark"><img src="/assets/everony-logo-192.webp" alt="" /></span>
           <div>
-            <strong>Everony</strong>
+            <strong>Everony · 小马聊天</strong>
             <span>{siteHost} · Bot 广场</span>
           </div>
         </div>

@@ -15,8 +15,25 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Everpony" />
     <title>Everony</title>
+    <!-- 首屏壁纸：preload 让背景和 HTML 并行下载（10KB WebP，几乎零成本） -->
+    <link rel="preload" as="image" href="/assets/aurora-1.webp" />
   </head>
   <body>
+    <!-- 极光壁纸层：三张 WebP 交叉淡入；省流模式/低配自动退回纯 CSS 极光 -->
+    <div class="aurora-wallpaper" aria-hidden="true">
+      <div class="wp-layer wp-1"></div>
+      <div class="wp-layer wp-2"></div>
+      <div class="wp-layer wp-3"></div>
+    </div>
+    <script>
+      // 省流：用户主动设置或慢速网络时只留 CSS 极光，不跑壁纸动画
+      try {
+        var lm = localStorage.getItem('fe_lite');
+        var slow = (navigator.connection && navigator.connection.saveData) ||
+          (navigator.connection && /2g/.test(navigator.connection.effectiveType || ''));
+        if (lm === '1' || slow) document.documentElement.dataset.lite = '1';
+      } catch (e) {}
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
     <script>

@@ -223,33 +223,28 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
   return (
     <div className="auth-wrap">
       <section className="auth-hero">
-        <div className="auth-orbit" aria-hidden="true">
-          <span className="ring ring-1" />
-          <span className="ring ring-2" />
-          <span className="ring ring-3" />
-          <span className="orbit-dot dot-1" />
-          <span className="orbit-dot dot-2" />
-          <span className="orbit-core" />
+        {/* 左侧：放大的小马 logo + 站点介绍，打开就看到 */}
+        <div className="auth-logo-stage" aria-hidden="true">
+          <span className="auth-logo-halo" />
+          <img className="auth-logo-img" src="/assets/everony-logo.webp" alt="" />
         </div>
 
         <div className="auth-brand">
-          <span className="brand-mark">
-            <Icon name="chat" size={22} />
-          </span>
+          <img className="auth-brand-logo" src="/assets/everony-logo-192.webp" alt="" />
           <div className="auth-brand-text">
             <strong>Everony</strong>
-            <span>Bot 广场 · 网页即开即聊</span>
+            <span>小马聊天 · 网页即开即聊</span>
           </div>
         </div>
 
         <div className="auth-hero-copy">
-          <span className="auth-eyebrow">Everony · 网页聊天</span>
+          <span className="auth-eyebrow">Everony · 小马与聊天</span>
           <h1>
-            把聊天
+            和喜欢的小马
             <br />
-            放回<span className="grad-text">你自己的电脑</span>
+            <span className="grad-text">随时聊聊天</span>
           </h1>
-          <p>一台服务器，一个地址，所有人打开就能聊。角色和 Bot 都摆在广场上。</p>
+          <p>一台服务器，一个地址，所有人打开就能聊。角色和 Bot 都摆在广场上，聊过的内容按号码替你记着。</p>
         </div>
 
         <ul className="auth-features">
@@ -281,7 +276,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont }) {
       <main className="auth-main">
         <div className="auth-card glass">
           <header className="auth-card-head">
-            <span className="auth-card-eyebrow">Everony · 网页聊天</span>
+            <span className="auth-card-eyebrow">Everony · 登录 / 注册</span>
             <div className="auth-tabs" role="tablist">
               <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
                 登录
