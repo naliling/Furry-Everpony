@@ -182,7 +182,8 @@ export default function ChatTab({ token, me, conversations, refreshConversations
               const preview = last ? last.preview || previewFor(last) : '还没有消息';
               const selected = c.id === activeId;
               const typingEntry = typingMap[c.id];
-              const typingLive = !!typingEntry && typingEntry.list.length > 0 && typingNow - typingEntry.at < 6500;
+              // 群聊不显示输入状态（用户 2026-11-17：群聊不该显示这个）
+              const typingLive = c.kind !== 'group' && !!typingEntry && typingEntry.list.length > 0 && typingNow - typingEntry.at < 6500;
               const typingText = typingLive
                 ? (c.kind === 'group'
                     ? typingEntry.list.slice(0, 2).map((t) => t.nickname || t.number).join('、') + ' 正在输入…'

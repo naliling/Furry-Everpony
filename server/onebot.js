@@ -472,10 +472,17 @@ export function createOneBot(options = {}) {
     return base;
   }
 
-  function isOnline(bot) {
-    const set = conns.get(bot.id);
+  /**
+   * 判断 Bot 是否在线。
+   * 兼容两种入参：内部调用传 bot 对象，server/index.js 里传的是账号 id 数字。
+   * 之前只认 bot.id，传数字时取到 undefined，导致「明明连着却一直显示离线」。
+   */
+  function isOnline(botOrId) {
+    const id = botOrId && typeof botOrId === 'object' ? botOrId.id : botOrId;
+    if (id === null || id === undefined) return false;
+    const set = conns.get(id);
     if (set && set.size) return true;
-    const st = outState.get(bot.id);
+    const st = outState.get(id);
     return !!(st && st.connected);
   }
 

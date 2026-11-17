@@ -481,12 +481,8 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
 
   const title = isGroup ? groupMeta.name || '群聊' : conversation?.peer?.nickname || '会话';
   const typingNames = typingShown.map((t) => t.nickname || t.number).filter(Boolean);
-  /* 手机端顶部空间窄：私聊昵称已经在标题上，只留「正在输入…」；群聊只留第一个昵称 */
-  const typingPrefix = typingNames.length
-    ? (isMobile ? (isGroup ? typingNames[0] + ' ' : '') : typingNames.slice(0, 2).join('、') + ' ')
-    : '';
-  /* 用户 2026-11-17：Bot 和个人号一律「正在输入…」，不许出现「正在思考」；群聊里完全不显示 */
-  const typingLabel = !isGroup && typingNames.length ? typingPrefix + '正在输入…' : '';
+  /* 用户 2026-11-17：Bot 和个人号一律显示「对方正在输入…」，不许出现「正在思考」；群聊里完全不显示 */
+  const typingLabel = !isGroup && typingNames.length ? '对方正在输入…' : '';
   // 群详情里的 members 正常是人数；万一某个服务端回的是成员数组，这里也要算对，不能拼成 [object Object]
   const groupMemberCount = Array.isArray(detail?.members) ? detail.members.length : Number(detail?.members || 0);
   const subtitle = isGroup
