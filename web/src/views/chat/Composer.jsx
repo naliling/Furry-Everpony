@@ -348,15 +348,12 @@ export default function Composer({ token, conversationId, isGroup, group, member
           <button type="button" className="icon-btn" onClick={() => imageRef.current?.click()} title="发送图片" aria-label="发送图片">
             <Icon name="image" size={19} />
           </button>
-          <button type="button" className={'icon-btn' + (recording ? ' on' : '')} onClick={() => (recording ? stopRecord() : startRecord())} title="语音" aria-label="语音">
-            <Icon name="mic" size={19} />
-          </button>
+          <input ref={imageRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) sendImage(f); }} />
           {isGroup ? (
             <button type="button" className="icon-btn" onClick={() => { setMentionOpen(true); textRef.current?.focus(); }} title="提醒某人" aria-label="提醒某人">
               <Icon name="at" size={19} />
             </button>
           ) : null}
-          <input ref={imageRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) sendImage(f); }} />
         </div>
 
         <div className="composer-actions">

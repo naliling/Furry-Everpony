@@ -38,14 +38,9 @@
   background-attachment: scroll;
   position: relative;
 }
+/* 背景图不再压深色遮罩：之前这层渐变让背景整体发灰发暗，用户反馈色差严重 */
 .msg-list.has-chat-bg::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(180deg, rgba(6, 9, 16, .34), rgba(6, 9, 16, .18));
-  backdrop-filter: saturate(.92);
-  z-index: 0;
+  content: none;
 }
 .msg-list.has-chat-bg > * { position: relative; z-index: 1; }
 

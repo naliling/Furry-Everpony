@@ -175,6 +175,9 @@ function migrate(db) {
   if (!hasColumn(db, 'accounts', 'avatar')) {
     db.exec("ALTER TABLE accounts ADD COLUMN avatar TEXT NOT NULL DEFAULT ''");
   }
+  if (!hasColumn(db, 'groups', 'avatar')) {
+    db.exec("ALTER TABLE groups ADD COLUMN avatar TEXT NOT NULL DEFAULT ''");
+  }
 
   // 资料卡：自定义背景 + 公开照片墙（JSON 数组，存 data URL 或 /uploads 地址）
   if (!hasColumn(db, 'accounts', 'card_bg')) {

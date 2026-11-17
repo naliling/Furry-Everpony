@@ -122,7 +122,7 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
                     <span className="bot-card-avatar"><Avatar number={bot.number} nickname={bot.nickname} avatar={bot.avatar} size={46} square /></span>
                     <span className="bot-card-main">
                       <span className="bot-card-name">{bot.nickname || bot.number}<span className="bot-card-online"><i className={bot.online ? 'on' : ''} /></span></span>
-                      <span className="bot-card-number">#{bot.number}{bot.remote ? <span className="tag tag-accent">远程</span> : null}</span>
+                      <span className="bot-card-number">#{bot.number}</span>
                       {(bot.tags || []).length ? (
                         <span className="bot-card-tags">
                           {(bot.tags || []).slice(0, 4).map((t) => <span className="tag-chip" key={t}>{t}</span>)}
@@ -130,7 +130,7 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
                       ) : null}
                       <span className="bot-card-bio">{bot.bio || '这个 Bot 还没有签名'}</span>
                     </span>
-                    <span className="bot-card-tag"><Icon name={bot.remote ? 'link' : 'bot'} size={12} /> {bot.remote ? '跨实例' : 'Bot'}</span>
+                    <span className="bot-card-tag"><Icon name="bot" size={12} /> Bot</span>
                   </button>
                 ))}
               </div>
@@ -244,10 +244,20 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
   const save = async () => {
     setSaving(true);
     try {
-      await api('/api/bots/' + bot.number, { method: 'PATCH', token, body: { nickname: form.nickname.trim(), bio: form.bio, public: form.public, tags: parseTags(form.tagsText) } });
+      await api('/api/bots/' + bot.number, { method: 'PATCH', token, body: { nickname: form.nickname.trim(), bio: form.bio, public: form.public, tags: parseTags(form.tagsText), ...(form.password ? { password: form.password } : {}) } });
       toast('已保存', 'success');
       onChanged?.();
     } catch (err) { toast(err.message, 'error'); } finally { setSaving(false); }
+  };
+
+  const delBot = async () => {
+    if (!window.confirm('确定删除 ' + (bot.nickname || bot.number) + ' 吗？它的消息、好友关系会一起清掉，删了不能恢复。')) return;
+    try {
+      await api('/api/bots/' + bot.number, { method: 'DELETE', token });
+      toast('已删除', 'success');
+      onChanged?.();
+      onClose?.();
+    } catch (err) { toast(err.message, 'error'); }
   };
 
   const max = stats?.total || Math.max(1, ...(stats?.ranking || []).map((r) => r.total));
@@ -259,7 +269,7 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
         <Avatar number={bot.number} nickname={bot.nickname} avatar={bot.avatar} size={64} square />
         <div className="bot-detail-id">
           <h3>{bot.nickname || '未命名 Bot'}</h3>
-          <p className="bot-detail-number">{bot.number}<span className="tag">{own ? '我的 Bot' : 'Bot'}</span>{bot.public ? <span className="tag tag-accent">公开</span> : null}{remote ? <span className="tag tag-accent">来自 {bot.addr || '别的实例'}</span> : null}</p>
+          <p className="bot-detail-number">{bot.number}<span className="tag">{own ? '我的 Bot' : 'Bot'}</span>{bot.public ? <span className="tag tag-accent">公开</span> : null}</p>
           {(bot.tags || []).length ? (
             <p className="bot-detail-tags">{(bot.tags || []).map((t) => <span className="tag-chip" key={t}>{t}</span>)}</p>
           ) : null}
@@ -293,9 +303,14 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
               </div>
               <label className="field"><span className="field-label">签名</span><textarea className="input textarea" rows={2} maxLength={80} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /></label>
               <label className="field"><span className="field-label">标签 <span className="field-hint">空格分隔，最多 5 个，每个 12 字内</span></span><input className="input" placeholder="例如 陪伴 中文 治愈" value={form.tagsText} onChange={(e) => setForm({ ...form, tagsText: e.target.value })} /></label>
+              <label className="field">
+                <span className="field-label">Bot 登录密码 <span className="field-hint">8 位以上；设好后用「号码 + 密码」就能登录这个 Bot</span></span>
+                <input className="input" type="password" autoComplete="new-password" placeholder={bot.hasPassword ? '已设置，留空表示不改' : '至少 8 位'} value={form.password || ''} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+              </label>
               <div className="bot-form-actions">
                 <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={save}>{saving ? <Spinner size={14} /> : <Icon name="check" size={15} />} 保存资料</button>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTokenOpen(true)}><Icon name="lock" size={15} /> 查看 Bot 令牌</button>
+                <button type="button" className="btn btn-danger btn-sm" onClick={delBot}><Icon name="trash" size={15} /> 删除这个 Bot</button>
               </div>
             </div>
           ) : null}
@@ -396,7 +411,7 @@ function ModelPanel({ token, bot }) {
     <div className="bot-detail-body">
       <p className="modal-hint">不接框架时，Bot 可以用这里的模型自己回话；接入 AstrBot 后由框架负责回复。</p>
       <div className="bot-form">
-        <label className="field"><span className="field-label">接口地址</span><input className="input" placeholder="https://api.example.com/v1" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
+        <label className="field"><span className="field-label">接口地址</span><input className="input" type="url" name="fe-model-endpoint" autoComplete="off" spellCheck={false} placeholder="https://api.example.com/v1" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
         <label className="field"><span className="field-label">API Key {config?.has_key ? <span className="tag tag-ok">已配置</span> : null}</span><input className="input" type="password" placeholder="sk-..." value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} /></label>
         <div className="bot-form-row">
           <label className="field"><span className="field-label">模型</span><input className="input" placeholder="deepseek-chat" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></label>

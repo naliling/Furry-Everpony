@@ -63,7 +63,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.17.0.10.25';
+const VERSION = '2026.11.17.0.10.27';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -637,6 +637,20 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
       .get(convId, meId);
   }
 
+  /** Bot 只要配了能用的模型（或接了 OneBot）就算在线：它随时能回话 */
+  function botHasModel(accountId) {
+    try {
+      const m = db.prepare('SELECT enabled, model FROM bot_models WHERE account_id = ?').get(accountId);
+      return Boolean(m && m.enabled && m.model);
+    } catch {
+      return false;
+    }
+  }
+
+  function botOnline(accountId) {
+    return onebot.isOnline(accountId) || botHasModel(accountId);
+  }
+
   /** 在线状态：90 秒内有请求就是在线；隐身一律显示离线 */
   function presenceOf(accountId) {
     const row = db
@@ -649,7 +663,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     if (!row) return { online: false, status: 'offline', last_seen: 0 };
     const seen = Number(row.seen || 0);
     if (row.type === 'bot') {
-      const on = onebot.isOnline(accountId);
+      const on = botOnline(accountId);
       return { online: on, status: on ? 'online' : 'offline', last_seen: seen };
     }
     const online = seen > Date.now() - ONLINE_WINDOW && row.status !== 'invisible';
@@ -1941,15 +1955,16 @@ app.get('/api/captcha', async (req, reply) => {
   app.get('/api/admin/bots', async (req, reply) => {
     const me = requireAdmin(req, reply);
     if (!me) return;
+    const includeHidden = String(req.query.includeHidden || '') === '1';
     const rows = db
       .prepare(
         `SELECT a.id, a.number, a.nickname, a.bio, a.avatar, a.is_public, a.owner_id, a.created_at,
                 o.number AS owner_number, o.nickname AS owner_nickname,
                 (SELECT COUNT(*) FROM messages m WHERE m.sender_id = a.id) AS msg_count
            FROM accounts a LEFT JOIN accounts o ON o.id = a.owner_id
-          WHERE a.type = 'bot' ORDER BY a.created_at DESC LIMIT 200`,
+          WHERE a.type = 'bot' AND (? = 1 OR a.is_public = 1) ORDER BY a.created_at DESC LIMIT 200`,
       )
-      .all();
+      .all(includeHidden ? 1 : 0);
     return {
       bots: rows.map((r) => ({ ...r, is_public: Number(r.is_public) === 1, online: onebot.isOnline(r.id) })),
     };
@@ -1978,6 +1993,7 @@ app.get('/api/captcha', async (req, reply) => {
         `SELECT m.id, m.conversation_id, m.body, m.kind, m.created_at, m.sender_id,
                 a.number AS sender_number, a.nickname AS sender_nickname, a.type AS sender_type
            FROM messages m JOIN accounts a ON a.id = m.sender_id
+          WHERE m.recalled = 0 AND m.body <> '[已被管理员删除]'
           ORDER BY m.id DESC LIMIT ?`,
       )
       .all(parsed.data.limit || 100);
@@ -3321,6 +3337,7 @@ app.get('/api/captcha', async (req, reply) => {
     const parsed = z
       .object({
         name: z.string().min(1).max(24).optional(),
+        avatar: z.string().max(300).optional(),
         announcement: z.string().max(500).optional(),
         mute_all: z.boolean().optional(),
       })
@@ -3331,6 +3348,9 @@ app.get('/api/captcha', async (req, reply) => {
     }
     if (parsed.data.mute_all !== undefined) {
       db.prepare('UPDATE groups SET mute_all = ? WHERE id = ?').run(parsed.data.mute_all ? 1 : 0, group.id);
+    }
+    if (parsed.data.avatar !== undefined) {
+      db.prepare('UPDATE groups SET avatar = ? WHERE id = ?').run(parsed.data.avatar, group.id);
     }
     if (parsed.data.announcement !== undefined) {
       db.prepare('UPDATE groups SET announcement = ?, announcement_updated_at = ? WHERE id = ?').run(
@@ -3382,6 +3402,7 @@ app.get('/api/captcha', async (req, reply) => {
         number: group.number,
         name: group.name,
         owner_id: group.owner_id,
+        avatar: group.avatar || '',
         announcement: group.announcement || '',
         announcement_updated_at: group.announcement_updated_at || 0,
         mute_all: !!group.mute_all,
@@ -3768,7 +3789,7 @@ app.get('/api/captcha', async (req, reply) => {
       bio: b.bio,
       avatar: b.avatar || '',
       tags: parseTags(b.tags),
-      online: onebot.isOnline(b.id),
+      online: botOnline(b.id),
       added: b.added,
       isFriend: friendSet.has(b.id),
       isMine: me ? b.id === me.id : false,
@@ -3891,6 +3912,35 @@ app.get('/api/captcha', async (req, reply) => {
     return { ok: true, hasPassword: Boolean(p.password) || Boolean(bot.password_hash) };
   });
 
+  /* 主人删除自己的 Bot：真删，不留数据 */
+  app.delete('/api/bots/:number', async (req, reply) => {
+    const me = requireAuth(req, reply);
+    if (!me) return;
+    const bot = findAccountByNumber(req.params.number);
+    if (!bot || bot.type !== 'bot' || bot.owner_id !== me.id) {
+      return reply.code(404).send({ error: '没有这个 Bot' });
+    }
+    const tx = db.transaction(() => {
+      db.prepare(
+        'DELETE FROM message_reactions WHERE message_id IN (SELECT id FROM messages WHERE sender_id = ?)',
+      ).run(bot.id);
+      db.prepare(
+        'DELETE FROM message_deletions WHERE message_id IN (SELECT id FROM messages WHERE sender_id = ?)',
+      ).run(bot.id);
+      db.prepare('DELETE FROM messages WHERE sender_id = ?').run(bot.id);
+      db.prepare('DELETE FROM conversation_members WHERE account_id = ?').run(bot.id);
+      db.prepare('DELETE FROM friendships WHERE a_id = ? OR b_id = ?').run(bot.id, bot.id);
+      db.prepare('DELETE FROM friend_requests WHERE from_id = ? OR to_id = ?').run(bot.id, bot.id);
+      db.prepare('DELETE FROM blocks WHERE a_id = ? OR b_id = ?').run(bot.id, bot.id);
+      db.prepare('DELETE FROM bot_links WHERE account_id = ?').run(bot.id);
+      db.prepare('DELETE FROM bot_models WHERE account_id = ?').run(bot.id);
+      db.prepare('DELETE FROM sessions WHERE account_id = ?').run(bot.id);
+      db.prepare('DELETE FROM accounts WHERE id = ?').run(bot.id);
+    });
+    tx();
+    return { ok: true, number: bot.number };
+  });
+
   app.get('/api/bots', async (req, reply) => {
     const me = requireAuth(req, reply);
     if (!me) return;
@@ -3907,7 +3957,7 @@ app.get('/api/captcha', async (req, reply) => {
         tags: parseTags(b.tags),
         public: !!b.is_public,
         token: b.access_token,
-        online: onebot.isOnline(b.id),
+        online: botOnline(b.id),
       })),
     };
   });

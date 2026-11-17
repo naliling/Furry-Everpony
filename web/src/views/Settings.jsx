@@ -11,8 +11,10 @@ import {
   consumePendingAnchor,
   pickChatBg,
   readChatBg,
+  readChatBgStyle,
   removeChatBgAt,
   resetChatBg,
+  saveChatBgStyle,
 } from '../lib/chatBg.js';
 
 const THEMES = [
@@ -101,6 +103,7 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
 
   /* ---- 聊天背景：和聊天页的背景面板共用 lib/chatBg.js，localStorage 只有一份 ---- */
   const [chatBg, setChatBg] = useState(() => readChatBg());
+  const [bgStyle, setBgStyle] = useState(() => readChatBgStyle());
   const [bgFlash, setBgFlash] = useState(false);
   const bgFileRef = useRef(null);
   const chatBgSectionRef = useRef(null);
@@ -472,6 +475,24 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
             <h3><Icon name="image" size={17} /> 聊天背景</h3>
             <span className="settings-hint">可以多选添加，最多 12 张</span>
           </header>
+          <div className="bg-style-row">
+            <label className="bg-style-field">
+              <span>显示方式</span>
+              <select className="input input-sm" value={bgStyle.fit} onChange={(e) => setBgStyle(saveChatBgStyle({ ...bgStyle, fit: e.target.value }))}>
+                <option value="cover">铺满裁切</option>
+                <option value="contain">完整显示</option>
+                <option value="repeat">平铺</option>
+              </select>
+            </label>
+            <label className="bg-style-field">
+              <span>对齐</span>
+              <select className="input input-sm" value={bgStyle.pos} onChange={(e) => setBgStyle(saveChatBgStyle({ ...bgStyle, pos: e.target.value }))}>
+                <option value="top">靠上</option>
+                <option value="center">居中</option>
+                <option value="bottom">靠下</option>
+              </select>
+            </label>
+          </div>
           <div className="bg-grid">
             <button
               type="button"
@@ -724,6 +745,19 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
               <p className="settings-hint">这一版还在改，看到不顺眼的地方直接跟站长说。</p>
             </>
           )}
+        </section>
+
+        <section className="settings-card">
+          <header className="settings-card-head"><h3><Icon name="heart" size={17} /> 支持这个站</h3></header>
+          <p className="settings-hint">
+            这个站没有广告、没有会员、不卖数据。域名、服务器、电费都是站长自己出，Bot 也是站长自己在养。
+            想让它活得久一点，可以跟站长说一声，或者把你的 Bot 挂到广场上，多一个人聊它就多一分意义。
+          </p>
+          <div className="settings-actions">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => toast('心意收到，跟站长说一声就行', 'success')}>
+              我想支持
+            </button>
+          </div>
         </section>
 
         <section className="settings-card settings-danger">

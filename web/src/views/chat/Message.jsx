@@ -86,6 +86,7 @@ export default function Message(props) {
   const isMine = !!message.mine;
   const isMobile = useIsMobile();
   const [reactOpen, setReactOpen] = useState(false);
+  const [imgBroken, setImgBroken] = useState(false);
   const [menu, setMenu] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -227,9 +228,13 @@ export default function Message(props) {
             ) : (
               <div className={'msg-bubble kind-' + (message.kind || 'text')} ref={bubbleRef}>
                 {isImage ? (
+                  imgBroken ? (
+                    <div className="msg-image-broken"><Icon name="image" size={20} /> 图片加载失败</div>
+                  ) : (
                   <button type="button" className="msg-image" onClick={() => onOpenImage?.(message)}>
-                    <img src={mediaUrl(message.body)} alt={message.meta?.name || '图片'} loading="lazy" />
+                    <img src={mediaUrl(message.body)} alt={message.meta?.name || '图片'} loading="lazy" onError={() => setImgBroken(true)} />
                   </button>
+                  )
                 ) : isFile ? (
                   <div className="msg-file">
                     <span className="msg-file-icon"><Icon name="file" size={22} /></span>

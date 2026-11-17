@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
 import { Avatar, Badge, Confirm, ContextMenu, Empty, Modal, SkeletonList, Spinner, toast } from '../../ui/primitives.jsx';
 import { api } from '../../lib/api.js';
@@ -6,6 +6,7 @@ import { relTime, statusMeta } from '../../lib/format.js';
 import ProfileModal from '../shared/ProfileModal.jsx';
 import { AddFriendModal, CreateGroupModal, JoinGroupModal } from '../shared/Dialogs.jsx';
 import GroupInfo from '../chat/GroupInfo.jsx';
+import { QrCode } from '../../ui/qr.jsx';
 
 export default function ContactsTab({ token, me, conversations = [], onOpenConversation, refreshConversations }) {
   const [view, setView] = useState('friends');
@@ -15,6 +16,8 @@ export default function ContactsTab({ token, me, conversations = [], onOpenConve
   const [requests, setRequests] = useState(null);
   const [groupRequests, setGroupRequests] = useState(null);
   const [search, setSearch] = useState('');
+  const [globalUsers, setGlobalUsers] = useState([]);
+  const [globalBusy, setGlobalBusy] = useState(null);
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [profile, setProfile] = useState(null);
   const [menu, setMenu] = useState(null);
@@ -83,6 +86,33 @@ export default function ContactsTab({ token, me, conversations = [], onOpenConve
     if (!kw) return true;
     return [g.name, g.number].some((v) => String(v || '').toLowerCase().includes(kw));
   }), [groups, kw]);
+
+  useEffect(() => {
+    if (view !== 'friends' || !kw) { setGlobalUsers([]); return; }
+    let alive = true;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api('/api/search/users?q=' + encodeURIComponent(kw), { token });
+        if (alive) setGlobalUsers((res.users || []).filter((u) => !u.isFriend));
+      } catch { if (alive) setGlobalUsers([]); }
+    }, 220);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [kw, view, token]);
+
+  const addByNumber = async (number) => {
+    setGlobalBusy(number);
+    try {
+      const res = await api('/api/friends/request', { method: 'POST', token, body: { number } });
+      toast(res.status === 'accepted' ? '你们已经是好友了' : '好友申请已发出', 'success');
+      loadFriends();
+      loadRequests();
+      setGlobalUsers((prev) => prev.filter((u) => u.number !== number));
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setGlobalBusy(null);
+    }
+  };
 
   const special = filteredFriends.filter((f) => f.special);
   const normal = filteredFriends.filter((f) => !f.special);
@@ -225,15 +255,42 @@ export default function ContactsTab({ token, me, conversations = [], onOpenConve
           </button>
         </div>
         {view !== 'requests' ? (
-          <div className="input-wrap contacts-search">
-            <Icon name="search" size={15} className="input-lead" />
-            <input className="input input-sm" placeholder={view === 'friends' ? '搜索好友' : '搜索群聊'} value={search} onChange={(e) => setSearch(e.target.value)} />
-            {search ? <button type="button" className="input-clear" aria-label="清空" onClick={() => setSearch('')}><Icon name="close" size={13} /></button> : null}
+          <div className="contacts-search-row">
+            <div className="input-wrap contacts-search">
+              <Icon name="search" size={15} className="input-lead" />
+              <input className="input input-sm" placeholder={view === 'friends' ? '搜号码、昵称、标签' : '搜索群聊'} value={search} onChange={(e) => setSearch(e.target.value)} />
+              {search ? <button type="button" className="input-clear" aria-label="清空" onClick={() => setSearch('')}><Icon name="close" size={13} /></button> : null}
+            </div>
+            <button type="button" className="icon-btn icon-btn-sm" aria-label="我的二维码" title="我的二维码" onClick={() => setDialog('qr')}><Icon name="qr" size={16} /></button>
+            <button type="button" className="icon-btn icon-btn-sm" aria-label="扫一扫" title="扫一扫" onClick={() => setDialog('scan')}><Icon name="camera" size={16} /></button>
           </div>
         ) : null}
       </div>
 
       <div className="contacts-body">
+        {view === 'friends' && kw && globalUsers.length > 0 ? (
+          <section className="friend-section global-section">
+            <header className="friend-section-head">
+              <Icon name="search" size={15} className="friend-caret" />
+              <h3>全站用户</h3>
+              <span className="friend-section-count">{globalUsers.length}</span>
+            </header>
+            <div className="global-user-list">
+              {globalUsers.map((u) => (
+                <div className="global-user-row" key={u.number}>
+                  <Avatar number={u.number} nickname={u.nickname} size={36} square={u.type === 'bot'} />
+                  <div className="global-user-main">
+                    <b>{u.nickname || u.number}{u.type === 'bot' ? <span className="tag tag-accent">Bot</span> : null}</b>
+                    <span>#{u.number}{u.bio ? ' · ' + u.bio : ''}</span>
+                  </div>
+                  <button type="button" className="btn btn-primary btn-sm" disabled={globalBusy === u.number} onClick={() => addByNumber(u.number)}>
+                    {globalBusy === u.number ? '发送中' : '加好友'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
         {view === 'friends' ? (
           friends === null ? <SkeletonList rows={6} /> : filteredFriends.length === 0 ? (
             <Empty icon="friend" title={kw ? '没有匹配的好友' : '还没有好友'} sub={kw ? '换个关键词试试' : '用号码添加第一个好友吧'}
@@ -401,9 +458,27 @@ export default function ContactsTab({ token, me, conversations = [], onOpenConve
       {dialog === 'group' ? <CreateGroupModal token={token} onClose={() => setDialog(null)} onCreated={(data) => { loadGroups(); loadFriends(); refreshConversations?.(); if (data?.conversationId) onOpenConversation?.(data.conversationId); }} /> : null}
       {dialog === 'join' ? <JoinGroupModal token={token} onClose={() => setDialog(null)} onJoined={() => { loadGroups(); refreshConversations?.(); }} /> : null}
       {confirm ? <Confirm title={confirm.title} message={confirm.message} danger={confirm.danger} onConfirm={confirm.onConfirm} onClose={() => setConfirm(null)} /> : null}
-      {groupInfo ? <GroupInfo token={token} me={me} group={groupInfo} onClose={() => setGroupInfo(null)} onChanged={loadGroups} onLeft={() => { setGroupInfo(null); loadGroups(); refreshConversations?.(); }} /> : null}
+              {dialog === 'qr' ? (
+          <Modal title="我的二维码" icon="qr" width={360} onClose={() => setDialog(null)}>
+            <div className="my-qr">
+              <QrCode text={String(me?.number || '')} size={190} />
+              <b>{me?.nickname || me?.number}</b>
+              <span className="my-qr-number">#{me?.number}</span>
+              <p className="settings-hint">号码是永久的，别人搜这个号码、或者扫这张码都能加到你。</p>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { navigator.clipboard?.writeText(String(me?.number || '')); toast('号码已复制', 'success'); }}>
+                <Icon name="copy" size={14} /> 复制号码
+              </button>
+            </div>
+          </Modal>
+        ) : null}
+
+        {dialog === 'scan' ? (
+          <ScanModal onClose={() => setDialog(null)} onFound={(num) => { setDialog(null); setSearch(num); addByNumber(num); }} />
+        ) : null}
+
+        {groupInfo ? <GroupInfo token={token} me={me} group={groupInfo} onClose={() => setGroupInfo(null)} onChanged={loadGroups} onLeft={() => { setGroupInfo(null); loadGroups(); refreshConversations?.(); }} /> : null}
       {newGroupName !== null ? (
-        <Modal title="新建好友分组" icon="folder" width={400} onClose={() => setNewGroupName(null)}>
+<Modal title="新建好友分组" icon="folder" width={400} onClose={() => setNewGroupName(null)}>
           <label className="field">
             <span className="field-label">分组名称</span>
             <input className="input" autoFocus maxLength={20} value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') createGroup(); }} placeholder="例如：一起玩的朋友" />
@@ -445,8 +520,65 @@ function FriendCard({ friend, onOpen, onMenu }) {
           {friend.last_seen && status === 'offline' ? ' · ' + relTime(friend.last_seen) : ''}
         </span>
       </span>
-      {friend.remote ? <span className="friend-card-remote" title={'来自 ' + (friend.addr || '别的实例')}><Icon name="link" size={12} /> 远程</span> : null}
       {friend.special ? <Icon name="starFilled" size={14} className="friend-card-star" /> : null}
     </button>
+  );
+}
+
+function ScanModal({ onClose, onFound }) {
+  const videoRef = useRef(null);
+  const [err, setErr] = useState('');
+  const [manual, setManual] = useState('');
+
+  useEffect(() => {
+    let stream = null;
+    let timer = null;
+    let stopped = false;
+    const start = async () => {
+      if (typeof window === 'undefined' || !('BarcodeDetector' in window)) {
+        setErr('这个浏览器不支持直接扫码，用手机相机扫对方的码，再把号码填进下面。');
+        return;
+      }
+      try {
+        const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+        timer = setInterval(async () => {
+          if (stopped || !videoRef.current) return;
+          try {
+            const codes = await detector.detect(videoRef.current);
+            for (const c of codes) {
+              const hit = String(c.rawValue || '').match(/\d{6,12}/);
+              if (hit) { stopped = true; onFound(hit[0]); return; }
+            }
+          } catch { /* 单帧识别失败忽略 */ }
+        }, 420);
+      } catch (e) {
+        setErr('打不开摄像头：' + (e && e.message ? e.message : '权限被拒绝') + '。可以直接填号码。');
+      }
+    };
+    start();
+    return () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+  }, [onFound]);
+
+  return (
+    <Modal title="扫一扫" icon="camera" width={420} onClose={onClose}>
+      <div className="scan-body">
+        <video ref={videoRef} className="scan-video" muted playsInline />
+        <p className="settings-hint">{err || '把对方的二维码放进取景框，识别到就自动加好友。'}</p>
+        <label className="field">
+          <span className="field-label">或者直接填号码</span>
+          <input className="input" inputMode="numeric" placeholder="8-11 位号码" value={manual} onChange={(e) => setManual(e.target.value.replace(/\D/g, '').slice(0, 11))} />
+        </label>
+        <button type="button" className="btn btn-primary btn-sm" disabled={manual.length < 6} onClick={() => onFound(manual)}>按号码加好友</button>
+      </div>
+    </Modal>
   );
 }

@@ -113,3 +113,27 @@ export function consumePendingAnchor() {
   }
   return anchor;
 }
+
+/** 背景显示方式：铺满 / 完整 / 平铺，位置：上 / 中 / 下。单独一个 key，不动原来的背景列表结构 */
+export const CHAT_BG_STYLE_KEY = 'fe_chat_bg_style';
+export function readChatBgStyle() {
+  try {
+    const d = JSON.parse(localStorage.getItem(CHAT_BG_STYLE_KEY) || '{}');
+    return {
+      fit: ['cover', 'contain', 'repeat'].includes(d.fit) ? d.fit : 'cover',
+      pos: ['top', 'center', 'bottom'].includes(d.pos) ? d.pos : 'center',
+    };
+  } catch {
+    return { fit: 'cover', pos: 'center' };
+  }
+}
+export function saveChatBgStyle(next) {
+  const s = {
+    fit: ['cover', 'contain', 'repeat'].includes(next?.fit) ? next.fit : 'cover',
+    pos: ['top', 'center', 'bottom'].includes(next?.pos) ? next.pos : 'center',
+  };
+  try { localStorage.setItem(CHAT_BG_STYLE_KEY, JSON.stringify(s)); } catch { /* 忽略 */ }
+  try { window.dispatchEvent(new Event(CHAT_BG_EVENT)); } catch { /* 忽略 */ }
+  return s;
+}
+

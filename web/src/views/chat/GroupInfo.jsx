@@ -88,6 +88,20 @@ export default function GroupInfo({ token, me, group, onClose, onChanged, onMemb
   const isAdmin = isOwner || myRole === 'admin';
   const canManage = isAdmin;
   const info = detail || group || {};
+  const avatarRef = useRef(null);
+  const pickAvatar = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { toast('只能选图片', 'error'); return; }
+    try {
+      const up = await uploadFile(file, token);
+      await api('/api/groups/' + number, { method: 'PATCH', token, body: { avatar: up.url } });
+      load();
+      onChanged?.();
+      toast('群头像已更新', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+  };
   const mutedAll = !!(info.mute_all);
   const myMutedUntil = Number(info.my_mute_until || 0);
   const myMuted = myMutedUntil > Date.now();
@@ -185,7 +199,6 @@ export default function GroupInfo({ token, me, group, onClose, onChanged, onMemb
 
   const tabs = [
     { id: 'members', label: '成员', icon: 'users', badge: detail?.members || members.length },
-    { id: 'files', label: '文件', icon: 'folder' },
     { id: 'announcement', label: '公告', icon: 'bell' },
     { id: 'settings', label: '设置', icon: 'gear' },
   ];
@@ -194,7 +207,16 @@ export default function GroupInfo({ token, me, group, onClose, onChanged, onMemb
     <Drawer title={info.name || '群资料'} subtitle={'群号 ' + (number || '') + (members.length ? ' · ' + members.length + ' 人' : '')} icon="group" onClose={onClose} width={400}>
       <div className="group-info">
         <div className="group-hero">
-          <Avatar number={number} nickname={info.name} square size={58} />
+          {isAdmin ? (
+            <>
+              <button type="button" className="group-hero-avatar" onClick={() => avatarRef.current?.click()} title="换群头像">
+                <Avatar number={number} nickname={info.name} avatar={info.avatar} square size={58} />
+              </button>
+              <input ref={avatarRef} type="file" accept="image/*" hidden onChange={pickAvatar} />
+            </>
+          ) : (
+            <Avatar number={number} nickname={info.name} avatar={info.avatar} square size={58} />
+          )}
           <div className="group-hero-main">
             <h3>{info.name || '群聊'}</h3>
             <div className="group-hero-meta">

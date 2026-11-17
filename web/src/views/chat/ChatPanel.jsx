@@ -10,7 +10,7 @@ import ImageViewer from '../../ui/ImageViewer.jsx';
 import { ForwardPicker, MergeViewer, SearchModal, AnnouncementModal } from '../shared/Dialogs.jsx';
 import ProfileModal from '../shared/ProfileModal.jsx';
 import ChatBgPanel from './ChatBgPanel.jsx';
-import { CHAT_BG_EVENT, currentChatBgUrl, readChatBg } from '../../lib/chatBg.js';
+import { CHAT_BG_EVENT, currentChatBgUrl, readChatBg, readChatBgStyle } from '../../lib/chatBg.js';
 
 export default function ChatPanel({ token, me, conversation, conversations = [], onBack, onActivity, onConversationGone, onOpenConversation, focusMessageId, onTypingChange }) {
   const isMobile = useIsMobile();
@@ -41,12 +41,13 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
   const [menu, setMenu] = useState(null);
   const [jumped, setJumped] = useState(0);
   const [chatBg, setChatBg] = useState('');
+  const [bgStyle, setBgStyle] = useState(() => readChatBgStyle());
   const [chatBgOpen, setChatBgOpen] = useState(false);
   const [typingShown, setTypingShown] = useState([]);
 
   // 聊天背景：和设置页共用 lib/chatBg.js，任一处改完都派发 fe:chatbg，这里即时生效
   useEffect(() => {
-    const read = () => setChatBg(currentChatBgUrl(readChatBg()));
+    const read = () => { setChatBg(currentChatBgUrl(readChatBg())); setBgStyle(readChatBgStyle()); };
     read();
     window.addEventListener(CHAT_BG_EVENT, read);
     return () => window.removeEventListener(CHAT_BG_EVENT, read);
@@ -265,10 +266,6 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
         if (profile) { setProfile(null); return; }
         if (groupInfo) { setGroupInfo(null); return; }
         if (isMobile) onBack?.();
-      }
-      if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        setSearchOpen(true);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -507,17 +504,6 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
     </>
   ) : subtitle;
 
-  const headerMenu = [
-    { label: pinned ? '取消置顶' : '置顶会话', icon: 'pin', onClick: togglePin },
-    { label: muted ? '关闭免打扰' : '消息免打扰', icon: 'mute', checked: muted, onClick: toggleMute },
-    { label: '多选消息', icon: 'list', onClick: () => setSelection(new Set()) },
-    { label: '搜索聊天记录', icon: 'search', onClick: () => setSearchOpen(true) },
-    { label: '聊天背景', icon: 'image', onClick: () => setChatBgOpen(true) },
-    ...(isGroup ? [{ label: '群资料', icon: 'group', onClick: () => openGroupInfo('members') }] : [{ label: '资料卡', icon: 'friend', onClick: () => setProfile(conversation?.peer?.number) }]),
-    { divider: true },
-    { label: '标记已读', icon: 'check', onClick: () => api('/api/conversations/' + convId + '/read', { method: 'POST', token }).then(() => toast('已标记已读', 'success')).catch((e) => toast(e.message, 'error')) },
-  ];
-
   return (
     <section className="chat-panel">
       <header className="chat-head">
@@ -528,7 +514,7 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
         ) : null}
         {isGroup ? (
           <button type="button" className="chat-head-main" onClick={() => openGroupInfo('members')}>
-            <Avatar number={groupNumber} nickname={title} square size={38} />
+            <Avatar number={groupNumber} nickname={title} avatar={detail?.group?.avatar || detail?.avatar || conversation?.group?.avatar} square size={38} />
             <span className="chat-head-text">
               <b>{title}</b>
               <span className={'chat-head-sub' + (typingShown.length ? ' typing' : '')}>{headSub}</span>
@@ -557,20 +543,12 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
             <button type="button" className="icon-btn" onClick={() => openGroupInfo('members')} title="群资料" aria-label="群资料">
               <Icon name="users" size={19} />
             </button>
-          ) : (
-            <button type="button" className="icon-btn chat-head-call" onClick={() => toast('语音通话将在后续版本开放', 'info')} title="通话" aria-label="通话">
-              <Icon name="phoneCall" size={19} />
-            </button>
-          )}
+          ) : null}
           <button type="button" className={'icon-btn' + (muted ? ' on' : '')} onClick={toggleMute} title={muted ? '关闭免打扰' : '消息免打扰'} aria-label="免打扰">
             <Icon name={muted ? 'mute' : 'bell'} size={19} />
           </button>
-          <button type="button" className="icon-btn" onClick={() => setSearchOpen(true)} title="搜索 (Ctrl+F)" aria-label="搜索">
-            <Icon name="search" size={19} />
-          </button>
-          <button type="button" className="icon-btn" onClick={(e) => setMenu({ x: e.clientX, y: e.clientY })} title="更多" aria-label="更多">
-            <Icon name="more" size={19} />
-          </button>
+
+
         </div>
       </header>
 
@@ -597,6 +575,7 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
       <div
         className={'msg-list' + (chatBg ? ' has-chat-bg' : '')}
         ref={listRef}
+        style={chatBg ? { backgroundSize: bgStyle.fit === 'repeat' ? 'auto' : bgStyle.fit, backgroundPosition: bgStyle.pos, backgroundRepeat: bgStyle.fit === 'repeat' ? 'repeat' : 'no-repeat' } : undefined}
         onScroll={onScroll}
         style={chatBg ? { backgroundImage: 'url("' + chatBg + '")' } : undefined}
       >
@@ -685,13 +664,11 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
         {isGroup ? (
           <>
             <button type="button" className="chat-quick-item" onClick={() => openGroupInfo('members')}><Icon name="users" size={16} /> 成员</button>
-            <button type="button" className="chat-quick-item" onClick={() => openGroupInfo('files')}><Icon name="folder" size={16} /> 文件</button>
             <button type="button" className="chat-quick-item" onClick={() => openGroupInfo('announcement')}><Icon name="bell" size={16} /> 公告</button>
             <button type="button" className="chat-quick-item" onClick={() => openGroupInfo('settings')}><Icon name="gear" size={16} /> 设置</button>
           </>
         ) : (
           <>
-            <button type="button" className="chat-quick-item" onClick={() => setSearchOpen(true)}><Icon name="search" size={16} /> 搜索</button>
             <button type="button" className="chat-quick-item" onClick={togglePin}><Icon name="pin" size={16} /> 置顶</button>
             <button type="button" className="chat-quick-item" onClick={toggleMute}><Icon name="mute" size={16} /> 免打扰</button>
             <button type="button" className="chat-quick-item" onClick={() => setProfile(conversation?.peer?.number)}><Icon name="friend" size={16} /> 资料</button>
@@ -699,7 +676,6 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
         )}
       </aside>
 
-      {menu ? <ContextMenu x={menu.x} y={menu.y} items={headerMenu} onClose={() => setMenu(null)} /> : null}
       {viewer ? <ImageViewer items={viewer.items} index={viewer.index} onIndex={(i) => setViewer((v) => ({ ...v, index: i }))} onClose={() => setViewer(null)} /> : null}
       {chatBgOpen ? <ChatBgPanel onClose={() => setChatBgOpen(false)} /> : null}
       {mergeMeta ? <MergeViewer meta={mergeMeta} token={token} onForward={forwardMergedItem} onClose={() => setMergeMeta(null)} /> : null}
@@ -725,10 +701,6 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
         <ProfileModal token={token} me={me} number={profile} onClose={() => setProfile(null)}
           onChat={(id) => { setProfile(null); onOpenConversation?.(id); }}
           onChanged={() => onActivity?.()} />
-      ) : null}
-      {searchOpen ? (
-        <SearchModal token={token} conversations={conversations} activeConversationId={convId} onClose={() => setSearchOpen(false)}
-          onOpen={(cid, mid) => { if (cid === convId) jumpTo(mid); else onOpenConversation?.(cid, mid); }} />
       ) : null}
       {announceOpen ? (
         <AnnouncementModal token={token} group={detail || groupMeta} canEdit={canManageGroup} onClose={() => setAnnounceOpen(false)} onChanged={() => { loadDetail(); onActivity?.(); }} />

@@ -66,6 +66,7 @@ export default function AdminPage({ token, me }) {
   const [q, setQ] = useState('');
   const [accounts, setAccounts] = useState(null);
   const [bots, setBots] = useState(null);
+  const [showHiddenBots, setShowHiddenBots] = useState(false);
   const [messages, setMessages] = useState(null);
   const [pendingList, setPendingList] = useState(null);
   const [logins, setLogins] = useState(null);
@@ -116,13 +117,13 @@ export default function AdminPage({ token, me }) {
 
   const loadBots = useCallback(async () => {
     try {
-      const data = await api('/api/admin/bots', { token });
+      const data = await api('/api/admin/bots' + (showHiddenBots ? '?includeHidden=1' : ''), { token });
       setBots(data.bots || []);
     } catch (err) {
       toast(err.message, 'error');
       setBots([]);
     }
-  }, [token]);
+  }, [token, showHiddenBots]);
 
   const loadMessages = useCallback(async () => {
     try {
@@ -948,6 +949,16 @@ export default function AdminPage({ token, me }) {
 
       {section === 'bots' ? (
         <section className="settings-card">
+          <div className="admin-filter-row">
+            <span className="admin-hint">默认只列已上架的 Bot，下架的不占地方</span>
+            <button
+              type="button"
+              className={'btn btn-sm ' + (showHiddenBots ? 'btn-primary' : 'btn-ghost')}
+              onClick={() => setShowHiddenBots((v) => !v)}
+            >
+              {showHiddenBots ? '只看已上架' : '显示已下架'}
+            </button>
+          </div>
           {bots === null ? (
             <SkeletonList rows={4} />
           ) : bots.length === 0 ? (

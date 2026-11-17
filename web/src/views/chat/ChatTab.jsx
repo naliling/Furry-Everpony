@@ -177,7 +177,7 @@ export default function ChatTab({ token, me, conversations, refreshConversations
           ) : (
             list.map((c) => {
               const name = c.kind === 'group' ? c.group?.name || '群聊' : c.peer?.nickname || c.peer?.number || '会话';
-              const avatar = c.kind === 'group' ? null : c.peer?.avatar;
+              const avatar = c.kind === 'group' ? c.group?.avatar || null : c.peer?.avatar;
               const last = c.last;
               const preview = last ? last.preview || previewFor(last) : '还没有消息';
               const selected = c.id === activeId;
@@ -260,7 +260,7 @@ export default function ChatTab({ token, me, conversations, refreshConversations
               <button type="button" className="btn btn-ghost" onClick={() => setDialog('join')}><Icon name="plus" size={17} /> 加入群</button>
             </div>
             <div className="chat-welcome-hint">
-              <Icon name="keyboard" size={14} /> Ctrl+F 搜索聊天记录 · Ctrl+N 发起会话
+              <Icon name="keyboard" size={14} /> Ctrl+N 发起会话
             </div>
           </div>
         )}

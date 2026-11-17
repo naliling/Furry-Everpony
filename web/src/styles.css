@@ -522,7 +522,8 @@ input {
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  max-width: 78%;
+  max-width: 100%;
+  width: 100%;
 }
 
 .msg.mine {

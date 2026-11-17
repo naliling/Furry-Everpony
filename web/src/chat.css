@@ -242,7 +242,7 @@
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  max-width: min(72%, 640px);
+  max-width: min(82%, 780px);
 }
 .msg-mine .msg-main {
   align-items: flex-end;
@@ -413,7 +413,7 @@
   overflow: hidden;
   border: 1px solid var(--line);
   background: var(--bg-panel);
-  max-width: 280px;
+  max-width: min(720px, 78vw);
   line-height: 0;
   transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
@@ -423,11 +423,11 @@
 }
 .msg-image img {
   display: block;
-  max-width: 280px;
-  max-height: 320px;
+  max-width: min(720px, 78vw);
+  max-height: 12000px;
   width: auto;
   height: auto;
-  object-fit: cover;
+  object-fit: contain;
 }
 .msg-file {
   display: flex;
@@ -636,11 +636,24 @@
   font-variant-numeric: tabular-nums;
 }
 
+.group-hero-avatar {
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  border-radius: 16px;
+  line-height: 0;
+  transition: transform var(--dur) var(--ease);
+}
+.group-hero-avatar:hover {
+  transform: translateY(-1px);
+}
+
 /* 工具条 */
 .msg-tools {
   position: absolute;
-  top: -16px;
-  right: 0;
+  bottom: -17px;
+  right: 2px;
   display: flex;
   gap: 1px;
   padding: 2px;
@@ -655,8 +668,8 @@
   z-index: 4;
 }
 .msg-mine .msg-tools {
-  right: auto;
-  left: 0;
+  right: 2px;
+  left: auto;
 }
 .msg:hover .msg-tools,
 .msg-tools:focus-within {
@@ -1473,9 +1486,10 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  place-items: center;
-  overflow: hidden;
-  padding: 8px 56px;
+  place-items: start center;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 8px 56px 24px;
   cursor: grab;
 }
 .imgviewer-stage:active {
@@ -1483,7 +1497,7 @@
 }
 .imgviewer-stage img {
   max-width: 100%;
-  max-height: 100%;
+  max-height: none;
   border-radius: 10px;
   box-shadow: 0 30px 90px -30px rgba(0, 0, 0, 0.9);
   transition: transform 120ms var(--ease);
@@ -1554,7 +1568,7 @@
   }
   .msg-image img,
   .msg-image {
-    max-width: min(240px, 62vw);
+    max-width: min(340px, 88vw);
   }
   .chat-quick {
     display: none;
@@ -1614,3 +1628,54 @@
     padding: 2px 14px 6px;
   }
 }
+
+/* 聊天背景：显示方式与对齐 */
+.bg-style-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.bg-style-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.bg-style-field .input-sm {
+  height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+  min-width: 96px;
+}
+
+.msg-image-broken {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px dashed var(--line-strong);
+  background: var(--bg-panel);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* 联系人页：全站用户搜索 */
+.global-user-list { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px 10px; }
+.global-user-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; }
+.global-user-row:hover { background: var(--bg-hover); }
+.global-user-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.global-user-main b { font-size: 13px; font-weight: 600; color: var(--text-1); display: flex; align-items: center; gap: 6px; }
+.global-user-main span { font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 联系人页：二维码与扫一扫 */
+.contacts-search-row { display: flex; align-items: center; gap: 6px; }
+.contacts-search-row .contacts-search { flex: 1; min-width: 0; }
+.my-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 0 2px; text-align: center; }
+.my-qr b { font-size: 15px; color: var(--text-1); }
+.my-qr-number { font-size: 12px; color: var(--text-3); letter-spacing: 1px; }
+.my-qr .settings-hint { text-align: center; }
+.scan-body { display: flex; flex-direction: column; gap: 10px; }
+.scan-video { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 14px; background: #05070c; border: 1px solid var(--line); }
