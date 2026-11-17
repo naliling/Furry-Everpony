@@ -63,7 +63,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.17.0.10.29';
+const VERSION = '2026.11.17.0.10.30';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -673,7 +673,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
   function convGroup(convId) {
     return db
       .prepare(
-        'SELECT id, number, name, announcement, announcement_updated_at, mute_all, owner_id FROM groups WHERE conversation_id = ?',
+        'SELECT id, number, name, avatar, announcement, announcement_updated_at, mute_all, owner_id FROM groups WHERE conversation_id = ?',
       )
       .get(convId);
   }
@@ -2767,7 +2767,7 @@ app.get('/api/captcha', async (req, reply) => {
     if (!conv) return null;
     if (conv.kind === 'group') {
       const g = convGroup(convId);
-      return { kind: 'group', group: g ? { number: g.number, name: g.name } : null };
+      return { kind: 'group', group: g ? { number: g.number, name: g.name, avatar: g.avatar || '' } : null };
     }
     const peer = peerOf(convId, meId);
     return {

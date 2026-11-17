@@ -1,3 +1,11 @@
+# v2026.11.17.0.10.30 — 2026-11-17
+
+## 头像不再被撑变形 + 资料卡大图置顶 + 群头像外面也能看到
+
+- 头像：`web/src/theme.css` 的 `.avatar > img` 改为绝对定位填满头像框。之前用 `height: 100%`，非 1:1 的图片会把 grid 行高撑开（实测头像框 64×64、图片却是 64×111），框被拉成竖椭圆、看着像没填进去。
+- 资料卡大图：`ProfileModal` 的 photoView 改用 `ImageViewer`（portal 到 body、z-index 2400），之前是页面内的 div，被资料卡的层叠上下文压在下面，点开看不见、也没有关闭按钮。实测打开后 elementFromPoint 命中查看器内的图片。
+- 群头像：`server/index.js` 的 `convGroup` 查询补 `avatar` 列，convMeta 返回 `group.avatar`，会话列表的群头像不再是首字占位（实测 src=/uploads/...）。
+
 # v2026.11.17.0.10.29 — 2026-11-17
 
 ## 群聊不再显示输入状态 + 图片不再占满屏 + Bot 在线状态修好

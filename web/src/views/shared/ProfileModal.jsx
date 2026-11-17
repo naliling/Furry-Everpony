@@ -3,6 +3,7 @@ import Icon from '../../ui/icons.jsx';
 import { Modal, Confirm, Spinner, Empty, toast, Avatar, StatusDot } from '../../ui/primitives.jsx';
 import { api } from '../../lib/api.js';
 import { statusMeta } from '../../lib/format.js';
+import ImageViewer from '../../ui/ImageViewer.jsx';
 
 export default function ProfileModal({ token, me, number, onClose, onChat, onChanged }) {
   const [user, setUser] = useState(null);
@@ -117,10 +118,10 @@ export default function ProfileModal({ token, me, number, onClose, onChat, onCha
 
   return (
     <>
+    {/* 大图改用 ImageViewer（portal 到 body，层级在最上面）；之前是页面内的 div，
+        嵌在资料卡的层叠上下文里，点开后被资料卡盖住 */}
     {photoView ? (
-      <div className="photo-viewer" onClick={() => setPhotoView('')} role="presentation">
-        <img src={photoView} alt="" />
-      </div>
+      <ImageViewer items={[{ url: photoView, name: '照片' }]} index={0} onClose={() => setPhotoView('')} />
     ) : null}
     <Modal title="资料卡" icon="friend" onClose={onClose} width={460}>
       {loading ? (

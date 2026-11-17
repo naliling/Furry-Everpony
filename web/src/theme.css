@@ -661,6 +661,10 @@ select.input option {
   user-select: none;
 }
 .avatar > img {
+  /* 绝对定位填满头像框：用 height:100% 时 grid 行高会被图片原始比例撑开，
+     非 1:1 的头像会把圆框拉成竖椭圆、看着像没填进框里 */
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   border-radius: inherit;
