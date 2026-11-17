@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
 import { Avatar, Empty, SkeletonList, Spinner, toast } from '../../ui/primitives.jsx';
-import { api } from '../../lib/api.js';
+import { api, shrinkImage } from '../../lib/api.js';
 import { relTime } from '../../lib/format.js';
 
 /* 管理后台：运营者看数据、管账号、管 Bot、审消息。只有 is_admin 能进。 */
@@ -80,6 +80,8 @@ export default function AdminPage({ token, me }) {
   const [gate, setGate] = useState('both');
   const [retention, setRetention] = useState(14);
   const [smtp, setSmtp] = useState({ host: '', port: 465, secure: true, user: '', pass: '', from: '', fromName: '' });
+  const [donation, setDonation] = useState({ link: '', image: '' });
+  const donationFileRef = useRef(null);
   const [testTo, setTestTo] = useState('');
   const [invites, setInvites] = useState(null);
   const [invCount, setInvCount] = useState(3);
@@ -177,6 +179,7 @@ export default function AdminPage({ token, me }) {
         fromName: s.fromName || '',
       });
       setInvites(inv.invites || []);
+      setDonation({ link: cfg.donationLink || '', image: cfg.donationImage || '' });
     } catch (err) {
       toast(err.message, 'error');
       setSiteCfg(false);
@@ -753,6 +756,70 @@ export default function AdminPage({ token, me }) {
               ))}
             </div>
           )}
+
+          <div className="admin-card-head admin-card-head-gap">
+            <div>
+              <h3>支持这个站</h3>
+              <p>用户点「我想支持」时展示的转账方式：贴一个转账链接，或上传一张收款码图片（微信 / 支付宝都行）。都不填就只显示提示。</p>
+            </div>
+          </div>
+          <div className="admin-form">
+            <label className="field">
+              <span className="field-label">转账链接</span>
+              <input
+                className="input"
+                value={donation.link}
+                placeholder="https://… 收款码页或转账页"
+                onChange={(e) => setDonation((d) => ({ ...d, link: e.target.value }))}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">收款码图片</span>
+              <div className="donation-image-row">
+                {donation.image ? (
+                  <img className="donation-image-preview" src={donation.image} alt="收款码" />
+                ) : null}
+                <div className="donation-image-btns">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => donationFileRef.current?.click()}
+                  >
+                    <Icon name="image" size={14} /> 选图片
+                  </button>
+                  {donation.image ? (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDonation((d) => ({ ...d, image: '' }))}>
+                      移除
+                    </button>
+                  ) : null}
+                </div>
+                <input
+                  ref={donationFileRef}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    shrinkImage(f, 600, 'image/jpeg', 0.85)
+                      .then((url) => setDonation((d) => ({ ...d, image: url })))
+                      .catch((err) => toast('图片处理失败：' + err.message, 'error'));
+                    e.target.value = '';
+                  }}
+                />
+              </div>
+            </label>
+          </div>
+          <div className="admin-toolbar">
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={busy === '/api/admin/site'}
+              onClick={() => saveSite({ donationLink: donation.link.trim(), donationImage: donation.image }, '支持配置已保存')}
+            >
+              保存支持配置
+            </button>
+          </div>
         </section>
       ) : null}
 

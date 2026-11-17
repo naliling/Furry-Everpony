@@ -701,6 +701,19 @@
   color: #fff;
   background: linear-gradient(135deg, rgba(91, 140, 255, 0.9), rgba(167, 123, 255, 0.9));
   box-shadow: 0 8px 20px -10px rgba(91, 140, 255, 0.8);
+  overflow: hidden;
+}
+/* 群设置了头像时，图片绝对定位铺满圆角框，非 1:1 也裁成方形不变形 */
+.group-card-avatar > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.group-card-avatar {
+  position: relative;
 }
 .group-card-main {
   flex: 1;
@@ -4229,4 +4242,55 @@ body,
 @media (max-width: 720px) {
   .admin-form { grid-template-columns: 1fr; }
   .admin-search-narrow { flex: 1 1 96px; min-width: 96px; }
+}
+
+/* ================= 支持这个站：捐赠弹窗 + 管理台配置 ================= */
+.donate-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 4px;
+}
+.donate-img {
+  max-width: 240px;
+  max-height: 240px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+}
+.donate-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 0.85rem;
+  padding: 24px 16px;
+}
+.donate-link {
+  width: 100%;
+  justify-content: center;
+  margin-top: 2px;
+}
+.donation-image-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.donation-image-preview {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  flex: none;
+}
+.donation-image-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }

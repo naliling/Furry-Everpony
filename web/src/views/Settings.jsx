@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../ui/icons.jsx';
-import { Avatar, Confirm, Empty, SkeletonList, Spinner, Toggle, toast } from '../ui/primitives.jsx';
+import { Avatar, Confirm, Empty, Modal, SkeletonList, Spinner, Toggle, toast } from '../ui/primitives.jsx';
 import { api, shrinkImage, SEND_MODE_KEY, NOTIFY_KEY, TOKEN_KEY, storageGet, storageSet, requestNotifyPermission, normalizeServerInfo } from '../lib/api.js';
 import { fmtSize, relTime, statusMeta } from '../lib/format.js';
 import { QrCode, QrScanner } from '../ui/qr.jsx';
@@ -52,6 +52,7 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
   const [firewall, setFirewall] = useState({ busy: false, ok: false, text: '' });
   const isDesktop = typeof window !== 'undefined' && !!window.feWin;
   const [confirm, setConfirm] = useState(null);
+  const [donateOpen, setDonateOpen] = useState(false);
   const [saved, setSaved] = useState('');
   const fileRef = useRef(null);
 
@@ -754,10 +755,28 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
             想让它活得久一点，可以跟站长说一声，或者把你的 Bot 挂到广场上，多一个人聊它就多一分意义。
           </p>
           <div className="settings-actions">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => toast('心意收到，跟站长说一声就行', 'success')}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDonateOpen(true)}>
               我想支持
             </button>
           </div>
+          {donateOpen ? (
+            <Modal title="支持这个站" icon="heart" onClose={() => setDonateOpen(false)} width={420}>
+              <div className="donate-box">
+                {server?.donationImage ? (
+                  <img className="donate-img" src={server.donationImage} alt="转账" />
+                ) : server?.donationLink ? (
+                  <div className="donate-empty"><Icon name="link" size={22} /> 扫码或点下方链接支持</div>
+                ) : (
+                  <div className="donate-empty"><Icon name="heart" size={22} /> 站长还没配置转账方式，跟站长说一声就行</div>
+                )}
+                {server?.donationLink ? (
+                  <a className="btn btn-primary btn-sm donate-link" href={server.donationLink} target="_blank" rel="noopener noreferrer">
+                    <Icon name="link" size={15} /> 打开转账链接
+                  </a>
+                ) : null}
+              </div>
+            </Modal>
+          ) : null}
         </section>
 
         <section className="settings-card settings-danger">

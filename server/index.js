@@ -63,7 +63,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.17.0.10.31';
+const VERSION = '2026.11.17.0.10.32';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -1465,6 +1465,8 @@ app.get('/api/captcha', async (req, reply) => {
       registerMode: registerMode(),
       pending: one('SELECT COUNT(*) AS n FROM accounts WHERE approved = 0').n || 0,
       bannedIps: one('SELECT COUNT(*) AS n FROM ip_bans').n || 0,
+      donationLink: getSetting('donationLink', ''),
+      donationImage: getSetting('donationImage', ''),
     };
   });
 
@@ -1472,11 +1474,22 @@ app.get('/api/captcha', async (req, reply) => {
     const me = requireAdmin(req, reply);
     if (!me) return;
     const parsed = z
-      .object({ registerMode: z.enum(['open', 'approval', 'closed']) })
+      .object({
+        registerMode: z.enum(['open', 'approval', 'closed']).optional(),
+        donationLink: z.string().max(500).optional(),
+        donationImage: z.string().max(400000).optional(),
+      })
       .safeParse(req.body || {});
-    if (!parsed.success) return reply.code(400).send({ error: '注册模式只能是 open / approval / closed' });
-    setSetting('registerMode', parsed.data.registerMode);
-    return { ok: true, registerMode: parsed.data.registerMode };
+    if (!parsed.success) return reply.code(400).send({ error: '参数不合法' });
+    if (parsed.data.registerMode !== undefined) setSetting('registerMode', parsed.data.registerMode);
+    if (parsed.data.donationLink !== undefined) setSetting('donationLink', parsed.data.donationLink);
+    if (parsed.data.donationImage !== undefined) setSetting('donationImage', parsed.data.donationImage);
+    return {
+      ok: true,
+      registerMode: parsed.data.registerMode !== undefined ? parsed.data.registerMode : registerMode(),
+      donationLink: getSetting('donationLink', ''),
+      donationImage: getSetting('donationImage', ''),
+    };
   });
 
   /* ---------- 站点公开信息（登录页要知道要不要邀请码） ---------- */
@@ -1487,6 +1500,8 @@ app.get('/api/captcha', async (req, reply) => {
     registerGate: registerGate(),
     smtpReady: smtpReady(),
     retentionDays: retentionDays(),
+    donationLink: getSetting('donationLink', ''),
+    donationImage: getSetting('donationImage', ''),
   }));
 
   /* ---------- 邮箱验证码（注册前先发码） ---------- */
@@ -1543,6 +1558,8 @@ app.get('/api/captcha', async (req, reply) => {
         from: cfg.from,
         fromName: cfg.fromName,
       },
+      donationLink: getSetting('donationLink', ''),
+      donationImage: getSetting('donationImage', ''),
     };
   });
 
@@ -1561,6 +1578,8 @@ app.get('/api/captcha', async (req, reply) => {
         smtpPass: z.string().max(200).optional(),
         smtpFrom: z.string().trim().max(120).optional(),
         smtpFromName: z.string().trim().max(40).optional(),
+        donationLink: z.string().max(500).optional(),
+        donationImage: z.string().max(400000).optional(),
       })
       .safeParse(req.body || {});
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
@@ -1576,7 +1595,16 @@ app.get('/api/captcha', async (req, reply) => {
     if (p.smtpPass !== undefined && p.smtpPass !== '') setSetting('smtpPass', p.smtpPass);
     if (p.smtpFrom !== undefined) setSetting('smtpFrom', p.smtpFrom);
     if (p.smtpFromName !== undefined) setSetting('smtpFromName', p.smtpFromName);
-    return { ok: true, registerGate: registerGate(), retentionDays: retentionDays(), smtpReady: smtpReady() };
+    if (p.donationLink !== undefined) setSetting('donationLink', p.donationLink);
+    if (p.donationImage !== undefined) setSetting('donationImage', p.donationImage);
+    return {
+      ok: true,
+      registerGate: registerGate(),
+      retentionDays: retentionDays(),
+      smtpReady: smtpReady(),
+      donationLink: getSetting('donationLink', ''),
+      donationImage: getSetting('donationImage', ''),
+    };
   });
 
   app.post('/api/admin/site/test-mail', async (req, reply) => {
@@ -3013,7 +3041,7 @@ app.get('/api/captcha', async (req, reply) => {
     if (!me) return;
     const groups = db
       .prepare(
-        `SELECT g.number, g.name, g.owner_id, g.conversation_id, g.announcement, g.announcement_updated_at,
+        `SELECT g.number, g.name, g.avatar, g.owner_id, g.conversation_id, g.announcement, g.announcement_updated_at,
                 g.mute_all, gm.role, gm.nickname AS group_nickname, gm.mute_until,
                 (SELECT COUNT(*) FROM group_members x WHERE x.group_id = g.id) AS members,
                 (SELECT COUNT(*) FROM group_requests r
@@ -3639,7 +3667,7 @@ app.get('/api/captcha', async (req, reply) => {
         Date.now(),
         me.id,
         token,
-        parsed.data.public ? 1 : 0,
+        parsed.data.public === false ? 0 : 1,
         JSON.stringify(parsed.data.tags || []),
       );
     const id = Number(info.lastInsertRowid);
@@ -4392,6 +4420,8 @@ app.get('/api/captcha', async (req, reply) => {
       lanNames,
       tunnel,
       webReady: existsSync(WEB_DIR),
+      donationLink: getSetting('donationLink', ''),
+      donationImage: getSetting('donationImage', ''),
     };
   });
 

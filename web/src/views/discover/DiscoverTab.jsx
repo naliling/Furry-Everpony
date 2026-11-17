@@ -209,7 +209,7 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
           onChat={() => dm(detail.number)}
           onSwitch={() => switchToBot(detail)}
           onCopy={copy}
-          onChanged={loadMine}
+          onChanged={() => { loadMine(); loadPublic(''); }}
           busy={busy === 'switch' + detail.number}
           adding={busy === 'add' + detail.number}
         />
@@ -269,7 +269,7 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
         <Avatar number={bot.number} nickname={bot.nickname} avatar={bot.avatar} size={64} square />
         <div className="bot-detail-id">
           <h3>{bot.nickname || '未命名 Bot'}</h3>
-          <p className="bot-detail-number">{bot.number}<span className="tag">{own ? '我的 Bot' : 'Bot'}</span>{bot.public ? <span className="tag tag-accent">公开</span> : null}</p>
+          <p className="bot-detail-number">{bot.number}<span className="tag">{own ? '我的 Bot' : 'Bot'}</span>{own ? (form.public ? <span className="tag tag-accent">公开</span> : null) : bot.public ? <span className="tag tag-accent">公开</span> : null}</p>
           {(bot.tags || []).length ? (
             <p className="bot-detail-tags">{(bot.tags || []).map((t) => <span className="tag-chip" key={t}>{t}</span>)}</p>
           ) : null}
@@ -516,7 +516,7 @@ function LinkPanel({ token, bot, link, onChanged, onCopy }) {
 }
 
 function CreateBotModal({ token, onClose, onCreated }) {
-  const [form, setForm] = useState({ number: '', nickname: '', bio: '', public: false, tagsText: '' });
+  const [form, setForm] = useState({ number: '', nickname: '', bio: '', public: true, tagsText: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const valid = /^[1-9]\d{7,10}$/.test(form.number) && form.nickname.trim().length > 0;

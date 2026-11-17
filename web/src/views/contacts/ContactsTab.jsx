@@ -347,7 +347,7 @@ export default function ContactsTab({ token, me, conversations = [], onOpenConve
             <div className="group-cards">
               {filteredGroups.map((g) => (
                 <button type="button" key={g.number} className="group-card" onClick={() => onOpenConversation?.(g.conversation_id)} onContextMenu={(e) => groupMenu(e, g)}>
-                  <span className="group-card-avatar"><Icon name="group" size={24} /></span>
+                  <span className="group-card-avatar">{g.avatar ? <img src={g.avatar} alt="" loading="lazy" /> : <Icon name="group" size={24} />}</span>
                   <span className="group-card-main">
                     <span className="group-card-name">{g.name}<span className="group-card-number">{g.number}</span></span>
                     <span className="group-card-meta">

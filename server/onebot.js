@@ -1255,7 +1255,7 @@ export function createOneBot(options = {}) {
   function outStateOf(botId) {
     let st = outState.get(botId);
     if (!st) {
-      st = { connected: false, ws: null, timer: null, url: '' };
+      st = { connected: false, ws: null, timer: null, pingTimer: null, url: '' };
       outState.set(botId, st);
     }
     return st;
@@ -1266,6 +1266,10 @@ export function createOneBot(options = {}) {
     if (st.timer) {
       clearTimeout(st.timer);
       st.timer = null;
+    }
+    if (st.pingTimer) {
+      clearInterval(st.pingTimer);
+      st.pingTimer = null;
     }
     if (st.ws) {
       try {
@@ -1296,6 +1300,12 @@ export function createOneBot(options = {}) {
     ws.on('open', () => {
       st.connected = true;
       log.info('[onebot] 反向连接成功', bot.number, url);
+      /* 每 20s 发一次 WS ping：防空闲被中间层/AstrBot 判死连接而掉线，掉线后 Bot 要等重连才能回，是「回复慢」的主因之一 */
+      st.pingTimer = setInterval(() => {
+        if (ws.readyState !== 1) return;
+        try { ws.ping(); } catch (e) { /* 忽略 */ }
+      }, 20000);
+      if (st.pingTimer.unref) st.pingTimer.unref();
       try {
         ws.send(
           JSON.stringify({
@@ -1329,6 +1339,7 @@ export function createOneBot(options = {}) {
     });
     ws.on('close', () => {
       st.connected = false;
+      if (st.pingTimer) { clearInterval(st.pingTimer); st.pingTimer = null; }
       log.warn('[onebot] 反向连接断开', bot.number, url);
       scheduleReconnect(bot, url, token, st);
     });
