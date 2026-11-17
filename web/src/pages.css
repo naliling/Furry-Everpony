@@ -4,6 +4,62 @@
    群资料 / 资料卡 / 各类选择器
    ============================================================ */
 
+/* ===== 登录页 v0.10.34：左侧大 logo + 右侧居中玻璃卡 ===== */
+.auth-wrap {
+  background: radial-gradient(75% 60% at 18% 12%, rgba(255,122,168,.10), transparent 70%),
+              radial-gradient(70% 55% at 82% 18%, rgba(111,191,159,.09), transparent 70%),
+              radial-gradient(80% 65% at 55% 110%, rgba(91,140,255,.12), transparent 70%);
+}
+.auth-hero {
+  background: linear-gradient(155deg, rgba(255,255,255,.09), rgba(255,255,255,.03));
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,.16);
+  box-shadow: var(--shadow-l), inset 0 1px 0 rgba(255,255,255,.14);
+  justify-content: center;
+}
+/* 放大的小马 logo */
+.auth-logo-stage {
+  position: relative;
+  align-self: center;
+  width: min(330px, 78%);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  margin: 2px 0 4px;
+}
+.auth-logo-img {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 18px 40px rgba(91,140,255,.35));
+  animation: logo-float 7s ease-in-out infinite;
+  will-change: transform;
+}
+.auth-logo-halo {
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(167,123,255,.34), rgba(91,140,255,.12) 55%, transparent 72%);
+  filter: blur(24px);
+  animation: halo-breathe 8s ease-in-out infinite;
+}
+@keyframes logo-float { 0%,100% { transform: translate3d(0,0,0) rotate(-1deg); } 50% { transform: translate3d(0,-12px,0) rotate(1deg); } }
+@keyframes halo-breathe { 0%,100% { opacity:.7; transform: scale(1); } 50% { opacity:1; transform: scale(1.08); } }
+.auth-brand-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  border-radius: 10px;
+}
+.auth-card.glass {
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  background: rgba(255,255,255,.10);
+  border: 1px solid rgba(255,255,255,.18);
+  box-shadow: var(--shadow-l), inset 0 1px 0 rgba(255,255,255,.16);
+}
 /* ================= 登录 / 注册 ================= */
 .auth-wrap {
   position: relative;
@@ -4293,4 +4349,36 @@ body,
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* 广场品牌位：小马 logo（覆盖旧星星图标样式） */
+.plaza-brand-mark {
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.2);
+  background: linear-gradient(150deg, rgba(255,122,168,.25), rgba(91,140,255,.3));
+  box-shadow: 0 12px 28px -14px rgba(91,140,255,.85), inset 0 1px 0 rgba(255,255,255,.2);
+}
+.plaza-brand-mark img { width: 100%; height: 100%; object-fit: contain; }
+/* 全站进场动画：卡片、面板错峰淡入 */
+.bot-card, .conv-item, .settings-card, .group-card {
+  animation: fe-rise-in 420ms cubic-bezier(.22,.61,.36,1) both;
+}
+.bot-card:nth-child(2), .conv-item:nth-child(2) { animation-delay: 45ms; }
+.bot-card:nth-child(3), .conv-item:nth-child(3) { animation-delay: 90ms; }
+.bot-card:nth-child(4), .conv-item:nth-child(4) { animation-delay: 135ms; }
+.bot-card:nth-child(5), .conv-item:nth-child(5) { animation-delay: 180ms; }
+@keyframes fe-rise-in {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+/* 玻璃卡 hover 优雅浮起（只动 transform/shadow） */
+.bot-card, .group-card {
+  transition: transform 280ms cubic-bezier(.22,.61,.36,1), box-shadow 280ms cubic-bezier(.22,.61,.36,1), border-color 280ms;
+}
+.bot-card:hover, .group-card:hover {
+  transform: translate3d(0,-6px,0) scale(1.012);
+  box-shadow: 0 26px 60px -24px rgba(5,8,22,.7);
+  border-color: rgba(255,255,255,.28);
 }
