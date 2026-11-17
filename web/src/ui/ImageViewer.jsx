@@ -3,10 +3,10 @@ import { createPortal } from 'react-dom';
 import Icon from './icons.jsx';
 import { useOverlay } from './primitives.jsx';
 
-const clampScale = (v) => Math.min(6, Math.max(1, v));
+const clampScale = (v) => Math.min(6, Math.max(0.5, v));
 
 export default function ImageViewer({ items = [], index = 0, onIndex, onClose }) {
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState(0.85);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const stageRef = useRef(null);
   const gesture = useRef(null);
@@ -18,7 +18,7 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
 
   const reset = () => {
     session.current += 1;
-    setScale(1);
+    setScale(0.85);
     setOffset({ x: 0, y: 0 });
   };
 
@@ -160,8 +160,8 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
           gesture.current = null;
         }}
         onDoubleClick={() => {
-          if (scale > 1) reset();
-          else setScale(2.4);
+          if (scale !== 0.85) reset();
+          else setScale(1.8);
         }}
       >
         <img

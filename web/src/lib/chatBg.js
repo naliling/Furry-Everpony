@@ -120,17 +120,17 @@ export function readChatBgStyle() {
   try {
     const d = JSON.parse(localStorage.getItem(CHAT_BG_STYLE_KEY) || '{}');
     return {
-      fit: ['cover', 'contain', 'repeat'].includes(d.fit) ? d.fit : 'cover',
-      pos: ['top', 'center', 'bottom'].includes(d.pos) ? d.pos : 'center',
+      fit: ['cover', 'contain', 'repeat'].includes(d.fit) ? d.fit : 'contain',
+      pos: ['top', 'center', 'bottom', 'left', 'right', 'top left', 'top right', 'bottom left', 'bottom right'].includes(d.pos) ? d.pos : 'center',
     };
   } catch {
-    return { fit: 'cover', pos: 'center' };
+    return { fit: 'contain', pos: 'center' };
   }
 }
 export function saveChatBgStyle(next) {
   const s = {
-    fit: ['cover', 'contain', 'repeat'].includes(next?.fit) ? next.fit : 'cover',
-    pos: ['top', 'center', 'bottom'].includes(next?.pos) ? next.pos : 'center',
+    fit: ['cover', 'contain', 'repeat'].includes(next?.fit) ? next.fit : 'contain',
+    pos: ['top', 'center', 'bottom', 'left', 'right', 'top left', 'top right', 'bottom left', 'bottom right'].includes(next?.pos) ? next.pos : 'center',
   };
   try { localStorage.setItem(CHAT_BG_STYLE_KEY, JSON.stringify(s)); } catch { /* 忽略 */ }
   try { window.dispatchEvent(new Event(CHAT_BG_EVENT)); } catch { /* 忽略 */ }
