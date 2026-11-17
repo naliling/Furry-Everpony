@@ -2507,19 +2507,13 @@
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     background: rgba(4, 8, 18, 0.9);
-    animation: none;
   }
   .overlay-drawer {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     background: rgba(4, 8, 18, 0.94);
   }
-  .drawer {
-    animation: none;
-  }
-  .modal {
-    animation: none;
-  }
+  /* 手机端同样保留打开/关闭动画，不再 animation:none */
 }
 
 /* 列表项依次入场（纯 CSS，不需要组件放变量） */

@@ -1,3 +1,11 @@
+# v2026.11.18.0.10.38 — 2026-11-18
+
+## 全站浮层动画统一：桌面手机同一套、侧栏也有动画
+
+- 根因：pages.css 手机断点里把 .overlay/.drawer/.modal 的 animation 设成 none，手机端浮层零动画；桌面端右键菜单 ContextMenu 从未接退出动画；侧栏切换无动画。
+- 修复：删掉手机端 animation:none；ContextMenu 接入 useOverlayClose（0.52s）；effects.css 追加全站统一动画——所有浮层开关 0.6s 淡入淡出（!important 强制），覆盖桌面/手机/浅色/深色主题；侧栏按钮与主内容切换也有 0.6s 过渡。
+- 实测（CDP 桌面）：点关闭后 150ms 弹窗仍在且 animation=fe-fade-out，850ms 才卸载，动画可见。
+
 # v2026.11.18.0.10.37 — 2026-11-18
 
 ## 关闭动画 + 邮箱注册 + 手机 Bot 资料卡
