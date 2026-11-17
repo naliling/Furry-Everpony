@@ -23,15 +23,6 @@ const THEMES = [
   { id: 'light', name: '晨雾', sub: '浅色 · 柔和通透', swatch: ['#eef3fb', '#ffffff', '#0e7490', '#7c3aed'] },
 ];
 
-const AVATAR_FRAMES = [
-  { id: 'none', name: '无' },
-  { id: 'neon', name: '霓虹' },
-  { id: 'gold', name: '鎏金' },
-  { id: 'candy', name: '糖果' },
-  { id: 'pixel', name: '像素' },
-  { id: 'orbit', name: '星环' },
-];
-
 const FONTS = [
   { id: 's', name: '小', sample: '14' },
   { id: 'm', name: '中', sample: '15' },
@@ -93,14 +84,6 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
       toast(err.message, 'error');
     }
   };
-
-  /* ---- 头像框（本地偏好，套在 html 上让全局 CSS 生效） ---- */
-  const [frame, setFrame] = useState(() => storageGet('fe_avatar_frame') || 'none');
-
-  useEffect(() => {
-    document.documentElement.dataset.avatarFrame = frame;
-    storageSet('fe_avatar_frame', frame);
-  }, [frame]);
 
   /* ---- 聊天背景：和聊天页的背景面板共用 lib/chatBg.js，localStorage 只有一份 ---- */
   const [chatBg, setChatBg] = useState(() => readChatBg());
@@ -447,14 +430,6 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
             </div>
           </div>
           <div className="settings-row">
-            <div className="settings-row-main"><b><Icon name="smile" size={16} /> 头像框</b><span>给头像套一圈内置边框，本机生效</span></div>
-            <div className="segmented">
-              {AVATAR_FRAMES.map((item) => (
-                <button type="button" key={item.id} className={frame === item.id ? 'on' : ''} onClick={() => setFrame(item.id)}>{item.name}</button>
-              ))}
-            </div>
-          </div>
-          <div className="settings-row">
             <div className="settings-row-main"><b><Icon name="keyboard" size={16} /> 发送方式</b><span>{sendMode === 'enter' ? 'Enter 发送，Shift+Enter 换行' : 'Ctrl+Enter 发送，Enter 换行'}</span></div>
             <div className="segmented">
               <button type="button" className={sendMode === 'enter' ? 'on' : ''} onClick={() => changeSendMode('enter')}>Enter 发送</button>
@@ -480,8 +455,8 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
             <label className="bg-style-field">
               <span>显示方式</span>
               <select className="input input-sm" value={bgStyle.fit} onChange={(e) => setBgStyle(saveChatBgStyle({ ...bgStyle, fit: e.target.value }))}>
+                <option value="contain">完整显示（推荐）</option>
                 <option value="cover">铺满裁切</option>
-                <option value="contain">完整显示</option>
                 <option value="repeat">平铺</option>
               </select>
             </label>
@@ -491,6 +466,12 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
                 <option value="top">靠上</option>
                 <option value="center">居中</option>
                 <option value="bottom">靠下</option>
+                <option value="left">靠左</option>
+                <option value="right">靠右</option>
+                <option value="top left">左上</option>
+                <option value="top right">右上</option>
+                <option value="bottom left">左下</option>
+                <option value="bottom right">右下</option>
               </select>
             </label>
           </div>
@@ -762,7 +743,11 @@ export default function Settings({ token, me, theme, onTheme, font, onFont, onOp
           {donateOpen ? (
             <Modal title="支持这个站" icon="heart" onClose={() => setDonateOpen(false)} width={420}>
               <div className="donate-box">
-                {server?.donationImage ? (
+                {Array.isArray(server?.donationImages) && server.donationImages.length ? (
+                  <div className="donate-img-grid">
+                    {server.donationImages.map((src, i) => <img className="donate-img" key={i} src={src} alt={'收款码 ' + (i + 1)} />)}
+                  </div>
+                ) : server?.donationImage ? (
                   <img className="donate-img" src={server.donationImage} alt="转账" />
                 ) : server?.donationLink ? (
                   <div className="donate-empty"><Icon name="link" size={22} /> 扫码或点下方链接支持</div>

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
 import { Avatar, Badge, Empty, Modal, SkeletonList, Spinner, Tabs, Toggle, toast } from '../../ui/primitives.jsx';
 import { api, serverBase } from '../../lib/api.js';
-import { fmtCount } from '../../lib/format.js';
 
 export default function DiscoverTab({ token, me, initialView, onBotSession, onOpenConversation }) {
   const [view, setView] = useState(initialView || 'plaza');
@@ -222,7 +221,6 @@ export default function DiscoverTab({ token, me, initialView, onBotSession, onOp
 function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overview', onClose, onChat, onSwitch, onCopy, onChanged, onAddRemote, busy, adding }) {
   const [tab, setTab] = useState(own ? initialTab : 'overview');
   const [link, setLink] = useState(null);
-  const [stats, setStats] = useState(null);
   const [form, setForm] = useState({
     nickname: bot.nickname || '',
     bio: bot.bio || '',
@@ -237,14 +235,13 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
     let alive = true;
     if (!own) { setStats(null); return () => { alive = false; }; }
     api('/api/bots/' + bot.number + '/link', { token }).then((r) => { if (alive) setLink(r.link); }).catch(() => {});
-    api('/api/bots/' + bot.number + '/stats', { token }).then((r) => { if (alive) setStats(r); }).catch(() => {});
     return () => { alive = false; };
   }, [bot.number, own, token]);
 
   const save = async () => {
     setSaving(true);
     try {
-      await api('/api/bots/' + bot.number, { method: 'PATCH', token, body: { nickname: form.nickname.trim(), bio: form.bio, public: form.public, tags: parseTags(form.tagsText), ...(form.password ? { password: form.password } : {}) } });
+      await api('/api/bots/' + bot.number, { method: 'PATCH', token, body: { nickname: form.nickname.trim(), bio: form.bio, tags: parseTags(form.tagsText), ...(form.password ? { password: form.password } : {}) } });
       toast('已保存', 'success');
       onChanged?.();
     } catch (err) { toast(err.message, 'error'); } finally { setSaving(false); }
@@ -260,7 +257,6 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
     } catch (err) { toast(err.message, 'error'); }
   };
 
-  const max = stats?.total || Math.max(1, ...(stats?.ranking || []).map((r) => r.total));
 
   return (
     <Modal title={bot.nickname || bot.number} icon="bot" width={720} onClose={onClose}
@@ -269,7 +265,7 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
         <Avatar number={bot.number} nickname={bot.nickname} avatar={bot.avatar} size={64} square />
         <div className="bot-detail-id">
           <h3>{bot.nickname || '未命名 Bot'}</h3>
-          <p className="bot-detail-number">{bot.number}<span className="tag">{own ? '我的 Bot' : 'Bot'}</span>{own ? (form.public ? <span className="tag tag-accent">公开</span> : null) : bot.public ? <span className="tag tag-accent">公开</span> : null}</p>
+          <p className="bot-detail-number">{bot.number}<span className="tag">{own ? '我的 Bot' : 'Bot'}</span><span className="tag tag-accent">公开</span></p>
           {(bot.tags || []).length ? (
             <p className="bot-detail-tags">{(bot.tags || []).map((t) => <span className="tag-chip" key={t}>{t}</span>)}</p>
           ) : null}
@@ -288,7 +284,7 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
       </div>
 
       {own ? <Tabs value={tab} onChange={setTab} tabs={[
-        { id: 'overview', label: '资料与排行' },
+        { id: 'overview', label: '资料' },
         { id: 'model', label: '模型' },
         { id: 'link', label: '接入与连接' },
       ]} /> : null}
@@ -299,7 +295,6 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
             <div className="bot-form">
               <div className="bot-form-row">
                 <label className="field"><span className="field-label">昵称</span><input className="input" maxLength={24} value={form.nickname} onChange={(e) => setForm({ ...form, nickname: e.target.value })} /></label>
-                <label className="field"><span className="field-label">公开到广场</span><div className="field-toggle"><Toggle checked={form.public} onChange={(v) => setForm({ ...form, public: v })} label="公开" /></div></label>
               </div>
               <label className="field"><span className="field-label">签名</span><textarea className="input textarea" rows={2} maxLength={80} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /></label>
               <label className="field"><span className="field-label">标签 <span className="field-hint">空格分隔，最多 5 个，每个 12 字内</span></span><input className="input" placeholder="例如 陪伴 中文 治愈" value={form.tagsText} onChange={(e) => setForm({ ...form, tagsText: e.target.value })} /></label>
@@ -315,27 +310,6 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
             </div>
           ) : null}
 
-          <section className="bot-stats">
-            <header className="bot-stats-head">
-              <h4><Icon name="grid" size={16} /> 发言排行</h4>
-              <span className="bot-stats-total">共 {fmtCount(stats?.total || 0)} 条发言</span>
-            </header>
-            {stats === null ? <SkeletonList rows={3} /> : (stats.ranking || []).length === 0 ? (
-              <Empty icon="chat" title="还没有发言记录" sub="和它聊几句，这里就会出现排行" compact />
-            ) : (
-              <div className="ranking">
-                {stats.ranking.map((row, i) => (
-                  <div className="rank-row" key={row.number}>
-                    <span className={'rank-no' + (i < 3 ? ' top' : '')}>{i + 1}</span>
-                    <Avatar number={row.number} nickname={row.nickname} size={26} />
-                    <span className="rank-name">{row.number === me?.number ? '我' : row.nickname || row.number}</span>
-                    <span className="rank-bar"><i style={{ width: Math.max(4, Math.round((row.total / max) * 100)) + '%' }} /></span>
-                    <span className="rank-count">{fmtCount(row.total)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
         </div>
       ) : null}
 
@@ -525,7 +499,7 @@ function CreateBotModal({ token, onClose, onCreated }) {
     setBusy(true); setError('');
     try {
       const tags = String(form.tagsText || '').split(/[\s,，]+/).map((t) => t.trim()).filter(Boolean).slice(0, 5);
-      const r = await api('/api/bots', { method: 'POST', token, body: { number: form.number, nickname: form.nickname.trim(), bio: form.bio, public: form.public, tags } });
+      const r = await api('/api/bots', { method: 'POST', token, body: { number: form.number, nickname: form.nickname.trim(), bio: form.bio, tags } });
       toast('Bot 创建成功', 'success');
       onCreated(r.bot);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
@@ -538,7 +512,7 @@ function CreateBotModal({ token, onClose, onCreated }) {
         <label className="field"><span className="field-label">昵称</span><input className="input" maxLength={24} placeholder="给它起个名字" value={form.nickname} onChange={(e) => setForm({ ...form, nickname: e.target.value })} /></label>
         <label className="field"><span className="field-label">签名</span><textarea className="input textarea" rows={2} maxLength={80} placeholder="一句话介绍" value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /></label>
         <label className="field"><span className="field-label">标签 <span className="field-hint">空格分隔，最多 5 个</span></span><input className="input" placeholder="例如 陪伴 中文 治愈" value={form.tagsText} onChange={(e) => setForm({ ...form, tagsText: e.target.value })} /></label>
-        <label className="field field-inline"><Toggle checked={form.public} onChange={(v) => setForm({ ...form, public: v })} label="公开到 Bot 广场" /><span className="field-hint">公开后别人不用加好友就能找它聊天</span></label>
+
       </div>
       <div className="modal-foot">
         <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>

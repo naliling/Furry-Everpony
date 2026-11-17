@@ -80,7 +80,7 @@ export default function AdminPage({ token, me }) {
   const [gate, setGate] = useState('both');
   const [retention, setRetention] = useState(14);
   const [smtp, setSmtp] = useState({ host: '', port: 465, secure: true, user: '', pass: '', from: '', fromName: '' });
-  const [donation, setDonation] = useState({ link: '', image: '' });
+  const [donation, setDonation] = useState({ link: '', images: [] });
   const donationFileRef = useRef(null);
   const [testTo, setTestTo] = useState('');
   const [invites, setInvites] = useState(null);
@@ -179,7 +179,7 @@ export default function AdminPage({ token, me }) {
         fromName: s.fromName || '',
       });
       setInvites(inv.invites || []);
-      setDonation({ link: cfg.donationLink || '', image: cfg.donationImage || '' });
+      setDonation({ link: cfg.donationLink || '', images: cfg.donationImages || (cfg.donationImage ? [cfg.donationImage] : []) });
     } catch (err) {
       toast(err.message, 'error');
       setSiteCfg(false);
@@ -327,20 +327,6 @@ export default function AdminPage({ token, me }) {
   };
 
   const unbanIp = (ip) => send('/api/admin/ip-bans/' + encodeURIComponent(ip), 'DELETE', null, '已解封该 IP');
-
-  const removeMessage = async (id) => {
-    const path = '/api/admin/messages/' + id;
-    setBusy(path);
-    try {
-      await api(path, { token, method: 'DELETE' });
-      toast('已删除', 'ok');
-      await loadMessages();
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      setBusy('');
-    }
-  };
 
   const onSearch = (value) => {
     setQ(value);
@@ -566,7 +552,7 @@ export default function AdminPage({ token, me }) {
           <div className="admin-card-head admin-card-head-gap">
             <div>
               <h3>发信服务（SMTP）</h3>
-              <p>配好之后注册能走「邮箱验证码」，也能给用户发通知。没配就只认邀请码。</p>
+              <p>配好才能发邮箱验证码。以 QQ 邮箱为例：设置 → 账户 → 开启 IMAP/SMTP，拿到 16 位「授权码」当密码；服务器填 smtp.qq.com，端口 465 选 SSL（或 587 选 STARTTLS），登录账号和发件人都填你的 QQ 邮箱。填完点「试发一封」验证，收到就是成功；收不到先检查授权码有没有填成登录密码。不配也能用，只是注册只能走邀请码。</p>
             </div>
             <span className={'admin-tag ' + (siteCfg && siteCfg.smtpReady ? 'ok' : 'danger')}>
               {siteCfg && siteCfg.smtpReady ? '已就绪' : '未配置'}
@@ -774,35 +760,27 @@ export default function AdminPage({ token, me }) {
               />
             </label>
             <label className="field">
-              <span className="field-label">收款码图片</span>
-              <div className="donation-image-row">
-                {donation.image ? (
-                  <img className="donation-image-preview" src={donation.image} alt="收款码" />
+              <span className="field-label">收款码图片（最多 6 张，可放微信/支付宝等多张）</span>
+              <div className="donation-images-grid">
+                {donation.images.map((src, i) => (
+                  <div className="donation-img-cell" key={i}>
+                    <img src={src} alt={'收款码 ' + (i + 1)} />
+                    <button type="button" className="donation-img-del" aria-label="移除" onClick={() => setDonation((d) => ({ ...d, images: d.images.filter((_, j) => j !== i) }))}>×</button>
+                  </div>
+                ))}
+                {donation.images.length < 6 ? (
+                  <button type="button" className="donation-img-add" onClick={() => donationFileRef.current?.click()}><Icon name="plus" size={20} /> 加图片</button>
                 ) : null}
-                <div className="donation-image-btns">
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => donationFileRef.current?.click()}
-                  >
-                    <Icon name="image" size={14} /> 选图片
-                  </button>
-                  {donation.image ? (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDonation((d) => ({ ...d, image: '' }))}>
-                      移除
-                    </button>
-                  ) : null}
-                </div>
                 <input
                   ref={donationFileRef}
                   type="file"
                   accept="image/*"
+                  multiple
                   hidden
                   onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (!f) return;
-                    shrinkImage(f, 600, 'image/jpeg', 0.85)
-                      .then((url) => setDonation((d) => ({ ...d, image: url })))
+                    const files = Array.from(e.target.files || []).slice(0, 6 - donation.images.length);
+                    Promise.all(files.map((f) => shrinkImage(f, 600, 'image/jpeg', 0.85)))
+                      .then((urls) => setDonation((d) => ({ ...d, images: [...d.images, ...urls].slice(0, 6) })))
                       .catch((err) => toast('图片处理失败：' + err.message, 'error'));
                     e.target.value = '';
                   }}
@@ -815,7 +793,7 @@ export default function AdminPage({ token, me }) {
               type="button"
               className="btn btn-primary btn-sm"
               disabled={busy === '/api/admin/site'}
-              onClick={() => saveSite({ donationLink: donation.link.trim(), donationImage: donation.image }, '支持配置已保存')}
+              onClick={() => saveSite({ donationLink: donation.link.trim(), donationImages: donation.images }, '支持配置已保存')}
             >
               保存支持配置
             </button>
@@ -1071,36 +1049,23 @@ export default function AdminPage({ token, me }) {
 
       {section === 'messages' ? (
         <section className="settings-card">
-          {messages === null ? (
-            <SkeletonList rows={6} />
-          ) : messages.length === 0 ? (
-            <Empty text="还没有消息" />
-          ) : (
-            <div className="admin-list">
-              {messages.map((m) => (
-                <div className="admin-row" key={m.id}>
-                  <div className="admin-row-main">
-                    <b>
-                      {m.sender_nickname} <em className="admin-tag">#{m.sender_number}</em>
-                      <em className="admin-tag">会话 {m.conversation_id}</em>
-                    </b>
-                    <span>{m.body || '（空）'}</span>
-                    <em className="admin-msg-time">{relTime(m.created_at)}</em>
-                  </div>
-                  <div className="admin-row-actions">
-                    <button
-                      type="button"
-                      className="btn btn-danger btn-sm"
-                      disabled={busy === '/api/admin/messages/' + m.id}
-                      onClick={() => removeMessage(m.id)}
-                    >
-                      <Icon name="trash" size={14} /> 删除
-                    </button>
-                  </div>
+          <div className="admin-terminal">
+            <div className="admin-terminal-head"><span className="term-dot red" /><span className="term-dot yellow" /><span className="term-dot green" /> 消息终端 · 只读</div>
+            <div className="admin-terminal-body">
+              {messages === null ? (
+                <div className="term-line">正在读取消息…</div>
+              ) : messages.length === 0 ? (
+                <div className="term-line">— 暂无消息 —</div>
+              ) : messages.map((m) => (
+                <div className="term-line" key={m.id}>
+                  <span className="term-time">[{new Date(m.created_at).toLocaleString()}]</span>
+                  <span className="term-user">{m.sender_nickname}#{m.sender_number}</span>
+                  <span className="term-sep">›</span>
+                  <span className="term-body">{m.body || '（空）'}</span>
                 </div>
               ))}
             </div>
-          )}
+          </div>
         </section>
       ) : null}
 

@@ -102,3 +102,72 @@
   .fe-reveal { opacity: 1; transform: none; transition: none; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ============================================================
+   v0.10.35 视觉修正：动画放慢 / 玻璃均匀 / 壁纸静态 / 浅透明
+   ============================================================ */
+
+/* 1) 动画时长：切页/弹窗/浮层 0.5–0.8 秒 */
+:root {
+  --dur: 560ms;
+  --dur-slow: 720ms;
+  --glass-alpha: 0.085;
+  --glass-alpha-strong: 0.12;
+  --glass-border-alpha: 0.16;
+}
+.overlay, .ctx-layer { animation-duration: 640ms !important; }
+.modal, .drawer, .ctx-menu, .ctx-sheet { animation-duration: 680ms !important; }
+@keyframes fe-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fe-pop { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
+.app-main > *, .auth-wrap, .plaza-page {
+  animation: fe-page-in 700ms cubic-bezier(.22,.61,.36,1) both;
+}
+@keyframes fe-page-in {
+  from { opacity: 0; transform: translate3d(0, 12px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 2) 玻璃边缘均匀：填充与描边同一档 alpha */
+.glass, .auth-card.glass, .auth-hero, .settings-card, .bot-card, .conv-item, .group-card {
+  background: rgba(255, 255, 255, var(--glass-alpha)) !important;
+  border-color: rgba(255, 255, 255, var(--glass-border-alpha)) !important;
+}
+:root[data-theme='light'] .glass, :root[data-theme='light'] .settings-card,
+:root[data-theme='light'] .bot-card, :root[data-theme='light'] .conv-item, :root[data-theme='light'] .group-card {
+  background: rgba(255, 255, 255, 0.42) !important;
+  border-color: rgba(255, 255, 255, 0.55) !important;
+}
+.glass::before { background: linear-gradient(180deg, rgba(255,255,255,.07), transparent 45%) !important; }
+
+/* 3) 壁纸静态：不轮播；按主题固定一张 */
+.aurora-wallpaper .wp-layer { animation: none !important; opacity: 0 !important; transform: none !important; }
+:root:not([data-theme]) .wp-1, :root[data-theme='deep'] .wp-1 { opacity: 1 !important; }
+:root[data-theme='violet'] .wp-2 { opacity: 1 !important; }
+:root[data-theme='light'] .wp-3 { opacity: 1 !important; }
+:root[data-theme='light'] .aurora-wallpaper::after { background: rgba(240,244,255,.42) !important; }
+
+/* 4) 浅透明：弹窗/页面能看到壁纸 */
+.overlay { background: rgba(6, 9, 20, 0.34) !important; }
+:root[data-theme='light'] .overlay { background: rgba(225, 232, 248, 0.22) !important; }
+.modal { background: rgba(20, 26, 46, 0.72) !important; -webkit-backdrop-filter: blur(18px) !important; backdrop-filter: blur(18px) !important; }
+:root[data-theme='light'] .modal { background: rgba(255, 255, 255, 0.72) !important; }
+.ctx-menu, .ctx-sheet { background: rgba(20, 26, 46, 0.74) !important; }
+.rail, .conv-column, .chat-column, .list-panel, .page-head, .settings-body, .discover-body, .contacts-body {
+  background-color: rgba(8, 12, 24, 0.42) !important;
+}
+:root[data-theme='light'] .rail, :root[data-theme='light'] .conv-column, :root[data-theme='light'] .chat-column,
+:root[data-theme='light'] .list-panel, :root[data-theme='light'] .page-head, :root[data-theme='light'] .settings-body,
+:root[data-theme='light'] .discover-body, :root[data-theme='light'] .contacts-body {
+  background-color: rgba(255, 255, 255, 0.45) !important;
+}
+
+/* ===== v0.10.35 聊天气泡半透明 ===== */
+:root {
+  --bubble-peer: rgba(255,255,255,0.10) !important;
+  --bubble-mine: linear-gradient(135deg, rgba(91,140,255,.72), rgba(160,107,255,.68)) !important;
+}
+:root[data-theme='light'] {
+  --bubble-peer: rgba(255,255,255,0.55) !important;
+  --bubble-mine: linear-gradient(135deg, rgba(74,134,255,.82), rgba(123,91,255,.8)) !important;
+}
+.msg-bubble { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
