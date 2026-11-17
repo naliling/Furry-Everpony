@@ -133,7 +133,21 @@ export default function Composer({ token, conversationId, isGroup, group, member
     setSending(true);
     try {
       const mentionAll = /@全体成员(\s|$)/.test(value);
-      await onSend({ body: value, kind: 'text', mentionAll, ...(reply?.id ? { replyTo: reply.id } : {}) });
+      /* 把文本里的 @昵称 / @号码 解析成成员号码，塞进 meta.mentions。
+         后端据此生成 OneBot 的 at 消息段，框架（AstrBot 等）才能真正识别到 @。 */
+      const mentions = [];
+      if (isGroup && Array.isArray(members)) {
+        for (const m of members) {
+          if (!m || !m.number || String(m.number) === String(me?.number)) continue;
+          const name = String(m.nickname || '').trim();
+          if ((name && value.includes('@' + name)) || value.includes('@' + m.number)) {
+            mentions.push(Number(m.number));
+          }
+        }
+      }
+      const uniqMentions = Array.from(new Set(mentions));
+      const meta = uniqMentions.length ? { mentions: uniqMentions } : undefined;
+      await onSend({ body: value, kind: 'text', mentionAll, ...(meta ? { meta } : {}), ...(reply?.id ? { replyTo: reply.id } : {}) });
       setText('');
       setDraft(conversationId, '');
       onCancelReply?.();
