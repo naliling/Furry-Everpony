@@ -12,12 +12,15 @@
   position: relative;
 }
 
-/* ---------- 左侧导航轨 ---------- */
+/* ---------- 左侧导航轨 ----------
+   参照主流桌面端：顶部品牌 → 主功能组 → 分隔线 → 次功能组 → 底部账号。
+   悬停时右侧弹出文字标签，和桌面端图标栏一致。
+   ---------------------------------------- */
 .rail {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: var(--rail-w);
   flex: none;
   padding: 14px 0 14px;
@@ -33,12 +36,23 @@
   height: 44px;
   display: grid;
   place-items: center;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
   border-radius: 14px;
   color: #fff;
   background: var(--grad-brand);
   box-shadow: var(--glow-brand);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   flex: none;
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.rail-logo:hover {
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 0 0 1px rgba(140, 170, 255, 0.45), 0 14px 30px -12px rgba(91, 140, 255, 0.95);
+}
+.rail-logo:active {
+  transform: scale(0.97);
 }
 .rail-logo-glow {
   position: absolute;
@@ -55,8 +69,20 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding-top: 8px;
+  gap: 10px;
+  padding-top: 6px;
+}
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.rail-sep {
+  width: 26px;
+  height: 1px;
+  flex: none;
+  background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
 }
 .rail-btn {
   position: relative;
@@ -64,6 +90,9 @@
   height: 44px;
   display: grid;
   place-items: center;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
   border-radius: 13px;
   color: var(--text-3);
   transition: color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur) var(--ease);
@@ -71,11 +100,15 @@
 .rail-btn:hover {
   color: var(--text-1);
   background: var(--bg-hover);
+  transform: translateY(-1px);
+}
+.rail-btn:active {
+  transform: scale(0.94);
 }
 .rail-btn.on {
   color: #fff;
-  background: linear-gradient(135deg, rgba(91, 140, 255, 0.28), rgba(167, 123, 255, 0.22));
-  box-shadow: inset 0 0 0 1px rgba(120, 150, 255, 0.32), 0 8px 22px -10px rgba(91, 140, 255, 0.8);
+  background: linear-gradient(135deg, rgba(91, 140, 255, 0.34), rgba(167, 123, 255, 0.26));
+  box-shadow: inset 0 0 0 1px rgba(120, 150, 255, 0.38), 0 10px 24px -12px rgba(91, 140, 255, 0.9);
 }
 .rail-btn.on::before {
   content: '';
@@ -89,9 +122,34 @@
   transform: translateY(-50%);
   box-shadow: 0 0 10px rgba(91, 140, 255, 0.9);
 }
-.rail-btn.on .fe-icon,
-.rail-btn.on svg {
+.rail-btn.on .rail-icon {
   filter: drop-shadow(0 0 6px rgba(91, 140, 255, 0.7));
+}
+
+/* 悬停文字标签：桌面端图标栏的通用识别方式 */
+.rail-btn::after {
+  content: attr(data-label);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-4px);
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: var(--bg-panel-solid);
+  border: 1px solid var(--line-strong);
+  color: var(--text-1);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 8px 20px -10px rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  z-index: 30;
+}
+.rail-btn:hover::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
 }
 .rail-badge {
   position: absolute;
@@ -124,6 +182,7 @@
   border-radius: 50%;
   border: 1px solid var(--line-strong);
   padding: 0;
+  cursor: pointer;
   transition: box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
 .rail-avatar:hover {

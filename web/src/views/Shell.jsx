@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../ui/icons.jsx';
+import RailIcon from '../ui/rail-icons.jsx';
 import { Avatar, Badge, Confirm, ContextMenu, Drawer, Empty, SkeletonList, Spinner, toast, useIsMobile } from '../ui/primitives.jsx';
 import { api, loadAccounts, forgetAccount, getDraft, messagePreviewText, normalizeFavorites, normalizeNotifications, toggleFavorite } from '../lib/api.js';
 import { relTime } from '../lib/format.js';
@@ -10,11 +11,13 @@ import Settings from './Settings.jsx';
 import AdminPage from './admin/AdminPage.jsx';
 
 /* 广场是首页：打开就看见有哪些 Bot，再进消息 */
+/* 侧栏顺序参照主流桌面端：消息 → 联系人 → 广场 → 收藏 → 我的，收藏是新增的独立入口 */
 const NAV = [
-  { id: 'plaza', icon: 'grid', label: '广场' },
   { id: 'chat', icon: 'chat', label: '消息' },
-  { id: 'contacts', icon: 'friend', label: '联系人' },
-  { id: 'me', icon: 'gear', label: '我的' },
+  { id: 'contacts', icon: 'contacts', label: '联系人' },
+  { id: 'plaza', icon: 'plaza', label: '广场' },
+  { id: 'favorites', icon: 'favorites', label: '收藏', action: 'favorites' },
+  { id: 'me', icon: 'me', label: '我的' },
 ];
 
 const NOTICE_META = {
@@ -275,8 +278,17 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
   const isBotAccount = meLive?.type === 'bot';
   const navItems = useMemo(() => {
     const base = isBotAccount ? NAV.filter((n) => n.id === 'chat' || n.id === 'me') : NAV;
-    return meLive?.is_admin ? [...base, { id: 'admin', icon: 'shield', label: '管理' }] : base;
+    return meLive?.is_admin ? [...base, { id: 'admin', icon: 'admin', label: '管理' }] : base;
   }, [meLive?.is_admin, isBotAccount]);
+
+  /* 侧栏点击：收藏是抽屉不是页面，走单独动作 */
+  const handleNav = (item) => {
+    if (item.action === 'favorites') {
+      openFavorites();
+      return;
+    }
+    goTab(item.id);
+  };
 
   const switchAccount = async (acc) => {
     try {
@@ -297,44 +309,57 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
   return (
     <div className={'app-shell' + (isMobile ? ' is-mobile' : '')}>
       <aside className="rail" aria-label="主导航">
-        <div className="rail-logo" title="Everony">
-          <Icon name="chatBubble" size={22} />
+        <button
+          type="button"
+          className="rail-logo"
+          title="Everony"
+          aria-label="Everony 首页"
+          onClick={() => { setDiscoverView('plaza'); setTab('plaza'); }}
+        >
+          <RailIcon name="logo" size={24} />
           <span className="rail-logo-glow" aria-hidden />
-        </div>
+        </button>
         <nav className="rail-nav">
-          {navItems.map((item) => (
+          <div className="rail-group">
+            {navItems.map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                className={'rail-btn' + (tab === item.id && item.id !== 'favorites' ? ' on' : '')}
+                onClick={() => handleNav(item)}
+                title={item.label}
+                aria-label={item.label}
+                data-label={item.label}
+                aria-current={tab === item.id ? 'page' : undefined}
+              >
+                <RailIcon name={item.icon} size={21} />
+                {navBadge(item.id) > 0 ? <span className="rail-badge">{navBadge(item.id) > 99 ? '99+' : navBadge(item.id)}</span> : null}
+              </button>
+            ))}
+          </div>
+          <span className="rail-sep" aria-hidden />
+          <div className="rail-group">
+            {isBotAccount ? null : (
             <button
               type="button"
-              key={item.id}
-              className={'rail-btn' + (tab === item.id ? ' on' : '')}
-              onClick={() => goTab(item.id)}
-              title={item.label}
-              aria-label={item.label}
-              aria-current={tab === item.id ? 'page' : undefined}
+              className={'rail-btn rail-bot' + (tab === 'plaza' && discoverView === 'mine' ? ' on' : '')}
+              title="我的 Bot"
+              aria-label="我的 Bot"
+              data-label="我的 Bot"
+              onClick={() => { setDiscoverView('mine'); setTab('plaza'); }}
             >
-              <Icon name={item.icon} size={21} />
-              {navBadge(item.id) > 0 ? <span className="rail-badge">{navBadge(item.id) > 99 ? '99+' : navBadge(item.id)}</span> : null}
+              <RailIcon name="bot" size={21} />
             </button>
-          ))}
+            )}
+            {isBotAccount ? null : (
+            <button type="button" className="rail-btn rail-bell" title="通知中心" aria-label="通知中心" data-label="通知中心" onClick={openNotifications}>
+              <RailIcon name="bell" size={21} />
+              {notifs.count > 0 ? <span className="rail-badge" >{notifs.count > 99 ? '99+' : notifs.count}</span> : null}
+            </button>
+            )}
+          </div>
         </nav>
         <div className="rail-foot">
-          {isBotAccount ? null : (
-          <button
-            type="button"
-            className={'rail-btn rail-bot' + (tab === 'plaza' && discoverView === 'mine' ? ' on' : '')}
-            title="我的 Bot"
-            aria-label="我的 Bot"
-            onClick={() => { setDiscoverView('mine'); setTab('plaza'); }}
-          >
-            <Icon name="bot" size={20} />
-          </button>
-          )}
-          {isBotAccount ? null : (
-          <button type="button" className="rail-btn rail-bell" title="通知中心" aria-label="通知中心" onClick={openNotifications}>
-            <Icon name="bell" size={20} />
-            {notifs.count > 0 ? <span className="rail-badge" >{notifs.count > 99 ? '99+' : notifs.count}</span> : null}
-          </button>
-          )}
           <button
             type="button"
             className="rail-avatar"
@@ -412,11 +437,11 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
               type="button"
               key={item.id}
               className={'mobile-tab' + (tab === item.id ? ' on' : '')}
-              onClick={() => goTab(item.id)}
+              onClick={() => handleNav(item)}
               aria-current={tab === item.id ? 'page' : undefined}
             >
               <span className="mobile-tab-icon">
-                <Icon name={item.icon} size={21} />
+                <RailIcon name={item.icon} size={21} />
                 {navBadge(item.id) > 0 ? <span className="mobile-tab-badge">{navBadge(item.id) > 99 ? '99+' : navBadge(item.id)}</span> : null}
                 {item.id === 'chat' && notifs.count > 0 && !(navBadge(item.id) > 0) ? <span className="mobile-tab-dot" /> : null}
               </span>
