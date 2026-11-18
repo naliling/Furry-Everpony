@@ -233,7 +233,7 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
 
   useEffect(() => {
     let alive = true;
-    if (!own) { setStats(null); return () => { alive = false; }; }
+    if (!own) return () => { alive = false; };
     api('/api/bots/' + bot.number + '/link', { token }).then((r) => { if (alive) setLink(r.link); }).catch(() => {});
     return () => { alive = false; };
   }, [bot.number, own, token]);

@@ -1,3 +1,12 @@
+# v2026.11.18.0.10.39 — 2026-11-18
+
+## 修好点开 Bot 崩溃：setStats is not defined
+
+- 根因：v0.10.35 删「发言排行」时删掉了 stats 的 useState 声明，但 BotDetail 的 useEffect 里还留着 `setStats(null)`，一点开任意 Bot 详情就抛 `setStats is not defined`、整页渲染失败（手机浏览器直接显示错误页）。
+- 修复：删掉这行残留调用；全项目扫过其它已删 state（invite/frame/stats）的残留引用，没有别的了。
+- 实测（CDP 390×844 手机）：点 Bot 卡片 → 资料卡正常弹出（标题「茉心·陌斯」）、无 error boundary、无 JS 报错；点关闭 150ms 弹窗仍在播 fe-overlay-out、800ms 才卸载。
+- 测试：p1 17/17、admin 24/24、captcha 13/13。
+
 # v2026.11.18.0.10.38 — 2026-11-18
 
 ## 全站浮层动画统一：桌面手机同一套、侧栏也有动画
