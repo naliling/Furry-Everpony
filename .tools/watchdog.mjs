@@ -47,10 +47,13 @@ async function healthy() {
   }
 }
 
+/* Tailscale/Funnel 守护交给独立的 PowerShell 哨兵（guard-tailscale.ps1），
+   因为 node 子进程对 tailscaled 的受保护 pipe 没权限，PowerShell 直调可以。 */
 log('watchdog up, port=' + PORT);
 startServer();
 
 setInterval(async () => {
+  guardTailscale();
   if (await healthy()) {
     if (fails > 0) log('health ok again');
     fails = 0;

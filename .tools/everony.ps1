@@ -51,13 +51,35 @@ function Get-TunnelUrl {
   return ''
 }
 
+function Ensure-Tailscale {
+  # 每次启动确保 Tailscale 服务在跑（用户有时会手动停掉后台进程）
+  try {
+    $svc = Get-Service Tailscale -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -ne 'Running') { Start-Service Tailscale }
+  } catch { }
+}
+
+function Get-FunnelState {
+  # 返回 'ON' / 'OFF' / 'NOLOGIN'，给弹窗显示固定地址健康状态
+  try {
+    $ts = 'C:\Program Files\Tailscale\tailscale.exe'
+    if (-not (Test-Path $ts)) { return 'OFF' }
+    $st = & $ts status 2>$null
+    if ($st -match 'Logged out|NeedsLogin') { return 'NOLOGIN' }
+    $fs = & $ts funnel status 2>$null
+    if ($fs -match 'Funnel on') { return 'ON' }
+  } catch { }
+  return 'OFF'
+}
+
 function Ensure-Funnel {
   # 每次启动幂等确保 Funnel 指向 7788：配置在就复用，丢了就自动重建，地址（绑在 tailnet 节点上）不变
   try {
+    Ensure-Tailscale
     $ts = 'C:\Program Files\Tailscale\tailscale.exe'
     if (-not (Test-Path $ts)) { return }
     $st = & $ts status 2>$null
-    if ($st -match 'Logged out') { return }   # 没登录就跳过，不阻塞本地服务启动
+    if ($st -match 'Logged out|NeedsLogin') { return }   # 没登录就跳过，不阻塞本地服务启动
     & $ts funnel --bg 7788 2>$null | Out-Null
   } catch { }
 }
@@ -109,6 +131,11 @@ try {
     & $Node (Join-Path $Root '.tools\launch-server.mjs') | Out-Null
     & $Node (Join-Path $Root '.tools\launch-tunnel.mjs') | Out-Null
     Ensure-Funnel
+    # Tailscale/Funnel 哨兵没在跑就拉起（外网固定地址挂了自动恢复）
+    $guard = Get-CimInstance Win32_Process -Filter "name='powershell.exe'" | Where-Object { $_.CommandLine -match 'guard-tailscale' }
+    if (-not $guard) {
+      Start-Process powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -ArgumentList '-File', (Join-Path $Root '.tools\guard-tailscale.ps1')
+    }
     for ($i = 0; $i -lt 40; $i++) {
       Start-Sleep -Milliseconds 400
       $health = Get-Health

@@ -1,3 +1,15 @@
+# v2026.11.20.0.10.42 — 2026-11-20
+
+## Tailscale/Funnel 常驻自愈：外网固定地址挂了自动恢复
+
+- **PowerShell 哨兵** `.tools/guard-tailscale.ps1`：每 20 秒确保 Tailscale 服务在跑、已登录、Funnel 指向 7788。因 node 子进程对 tailscaled 受保护 pipe 没权限（Access is denied），改用 PowerShell 直调 tailscale.exe（已验证可行）。
+- **实测自愈**：故意 tailscale funnel reset 打掉固定地址，25 秒内哨兵自动重建，公网 /api/health 从 000 恢复 200，地址仍是 ponynaliling.tail31c195.ts.net。
+- **Tailscale 服务本身**：StartType 已是 Automatic（开机自启）；实测普通 PowerShell 连 Stop-Service 都停不掉它（系统保护），误停风险极低；哨兵仍会在服务非 Running 时 Start-Service 兜底。
+- **接入自启链**：开机自启 VBS 和桌面一键启动脚本都拉起哨兵（幂等）。桌面开关 stop 动作不碰 Tailscale，只停网站服务，固定地址保持。
+- **桌面开关弹窗**：外网地址旁显示 [固定·正常] / [Tailscale未登录] / [临时地址]，一眼看出固定地址健康状态。
+- 修 everony.ps1 每次 edit 后 UTF-8 BOM 丢失导致的 PowerShell 5.1 中文乱码语法错。
+
+# v2026.11.20.0.10.41 — 2026-11-20
 # v2026.11.20.0.10.41 — 2026-11-20
 
 ## 桌面一键启动 + 固定地址可靠性加固
@@ -10,17 +22,3 @@
 
 # v2026.11.20.0.10.40 — 2026-11-20
 # v2026.11.20.0.10.40 — 2026-11-20
-
-## 固定公网地址：Tailscale Funnel 接入，网站永久可访问
-
-- **固定地址上线**：`https://ponynaliling.tail31c195.ts.net/`，公网实测 `/api/health` 200、首页 200，永久不变、免费、不用银行卡/实名。
-- 过程：winget 装 Tailscale 1.104.7 → 用户 GitHub(naliling) 登录 → tailnet 开启 Funnel → `tailscale funnel --bg 7788` 把本机服务发布到公网。关键教训：`tailscale login` 的等回调进程不能被超时杀掉（之前 60s 超时导致网页显示成功但本机一直 NeedsLogin）；Funnel 要先在 `login.tailscale.com/f/funnel` 开账号级开关。
-- 服务端 `/api/server-info` 优先读 `data/funnel.json` 的固定地址，站点「我的 → 访问入口」卡片显示固定地址；没有才回退到 quick tunnel 临时地址。
-- 修复 Funnel 502：本机服务和看门狗曾同时挂掉，用 launch-server.mjs 拉起看门狗后恢复；现看门狗常驻，服务挂了自动重启。
-- Cloudflare named tunnel / Cloudflare One / 樱花FRP 这些要银行卡/2FA/实名的路全部放弃，不再折腾账号。
-- `everong.dpdns.org`（DigitalPlat）NS 正常但 DNS 记录空：在 DigitalPlat 加一条 CNAME（名称 @，值 `ponynaliling.tail31c195.ts.net`）即可用该域名访问，这一步需用户本人填（只有 DNS 编辑权限在他手里）。
-
-# v2026.11.18.0.10.39 — 2026-11-18
-# v2026.11.18.0.10.39 — 2026-11-18
-
-## 修好点开 Bot 崩溃：setStats is not defined
