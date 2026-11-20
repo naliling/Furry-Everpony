@@ -63,7 +63,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.18.0.10.39';
+const VERSION = '2026.11.20.0.10.40';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -4427,13 +4427,17 @@ app.get('/api/captcha', async (req, reply) => {
     const candidates = lanCandidates();
     const lanUrls = candidates.map((item) => `http://${item.address}:${PORT}`);
     const lanNames = candidates.map((item) => item.name);
-    /* 隧道地址由 .tools/tunnel.mjs 写入 data/tunnel.json，没有就是空串 */
+    /* 固定公网地址优先用 Tailscale Funnel（永久不变）；没有就用 quick tunnel 的临时地址 */
     let tunnel = '';
     try {
-      const file = join(DATA_DIR, 'tunnel.json');
-      if (existsSync(file)) tunnel = JSON.parse(readFileSync(file, 'utf8')).url || '';
-    } catch {
-      /* 隧道信息坏了不影响主流程 */
+      const tsFile = join(DATA_DIR, 'funnel.json');
+      if (existsSync(tsFile)) tunnel = JSON.parse(readFileSync(tsFile, 'utf8')).url || '';
+    } catch { /* 忽略 */ }
+    if (!tunnel) {
+      try {
+        const file = join(DATA_DIR, 'tunnel.json');
+        if (existsSync(file)) tunnel = JSON.parse(readFileSync(file, 'utf8')).url || '';
+      } catch { /* 隧道信息坏了不影响主流程 */ }
     }
     return {
       version: VERSION,
