@@ -12,7 +12,6 @@ node_modules/
 !.tools/tunnel.mjs
 !.tools/watchdog.mjs
 !.tools/everony.ps1
-!.tools/guard-tailscale.ps1
 !.tools/test-p1.mjs
 !.tools/test-admin.mjs
 !.tools/test-captcha.mjs

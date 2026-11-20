@@ -128,14 +128,11 @@ try {
       exit 0
     }
     Show-Popup ('正在启动，最多等十几秒…' + $NL + $NL + '启动完会自动打开网页') 'Everony' 3
-    & $Node (Join-Path $Root '.tools\launch-server.mjs') | Out-Null
-    & $Node (Join-Path $Root '.tools\launch-tunnel.mjs') | Out-Null
+    # 直接启动服务端（带 server.env 提供 FE_DB 等环境变量），不经过看门狗：用户要完全自己控制，关掉就是关掉，不会被自动拉起
+    $envArg = '--env-file=' + (Join-Path $Root '.tools\server.env')
+    Start-Process -FilePath $Node -ArgumentList @($envArg, (Join-Path $Root 'server\index.js')) -WorkingDirectory $Root -WindowStyle Hidden
+    # 本次启动开一次固定地址 Funnel（不拉任何常驻守护进程）
     Ensure-Funnel
-    # Tailscale/Funnel 哨兵没在跑就拉起（外网固定地址挂了自动恢复）
-    $guard = Get-CimInstance Win32_Process -Filter "name='powershell.exe'" | Where-Object { $_.CommandLine -match 'guard-tailscale' }
-    if (-not $guard) {
-      Start-Process powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -ArgumentList '-File', (Join-Path $Root '.tools\guard-tailscale.ps1')
-    }
     for ($i = 0; $i -lt 40; $i++) {
       Start-Sleep -Milliseconds 400
       $health = Get-Health
