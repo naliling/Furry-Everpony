@@ -73,10 +73,10 @@ html[data-avatar-frame='orbit'] .avatar::after {
   inset: -5px;
   border-radius: 50%;
   border: 1px dashed rgba(150, 200, 255, .75);
-  animation: fe-orbit 9s linear infinite;
+  animation: fe-avatar-orbit 9s linear infinite;
   pointer-events: none;
 }
-@keyframes fe-orbit { to { transform: rotate(360deg); } }
+@keyframes fe-avatar-orbit { to { transform: rotate(360deg); } }
 
 /* ---------- 昵称字体 ---------- */
 html[data-name-font='round'] .msg-name,
@@ -150,7 +150,7 @@ html[data-name-font='bold'] .profile-name {
   opacity: 0;
   transition: opacity .15s ease;
 }
-.bg-cell:hover .bg-del { opacity: 1; }
+.bg-cell:is(:hover, :focus-within) .bg-del { opacity: 1; }
 .bg-add { border-style: dashed; cursor: pointer; }
 .bg-none { cursor: pointer; }
 
@@ -191,7 +191,8 @@ html[data-name-font='bold'] .profile-name {
   opacity: 0;
   transition: opacity .15s ease;
 }
-.photo-cell:hover .photo-del { opacity: 1; }
+.photo-cell:is(:hover, :focus-within) .photo-del { opacity: 1; }
+@media (hover: none) { .bg-del, .photo-del { opacity: 1; } }
 
 /* ---------- 资料卡：背景 + 照片 ---------- */
 .profile-banner.has-bg {
@@ -231,17 +232,13 @@ html[data-name-font='bold'] .profile-name {
   place-items: center;
   padding: 4vh 4vw;
   cursor: zoom-out;
-  animation: fe-fade .18s ease;
 }
 .photo-viewer img {
   max-width: 100%;
   max-height: 92vh;
   border-radius: 14px;
   box-shadow: 0 24px 70px rgba(0, 0, 0, .6);
-  animation: fe-pop .2s ease;
 }
-@keyframes fe-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes fe-pop { from { transform: scale(.94); opacity: .6; } to { transform: scale(1); opacity: 1; } }
 
 /* ---------- 设置页：危险操作 ---------- */
 .settings-danger {
@@ -305,7 +302,7 @@ html[data-name-font='bold'] .profile-name {
   letter-spacing: 0.01em;
   pointer-events: none;
   backdrop-filter: blur(16px) saturate(150%);
-  animation: fe-banner-in 260ms var(--ease, ease);
+  animation: fe-banner-in var(--motion-feedback) var(--motion-ease);
 }
 .net-banner.offline {
   color: #ffd9a3;
@@ -323,8 +320,7 @@ html[data-name-font='bold'] .profile-name {
   height: 7px;
   border-radius: 50%;
   background: #ffb347;
-  box-shadow: 0 0 0 0 rgba(255, 170, 60, 0.55);
-  animation: fe-net-pulse 1.7s ease-out infinite;
+  box-shadow: 0 0 0 2px rgba(255, 170, 60, .22);
 }
 .net-banner-reason {
   max-width: 46vw;
@@ -346,11 +342,6 @@ html[data-desktop='1'] .net-banner { top: 34px; }
 }
 :root[data-theme='light'] .net-banner-reason { color: #8a5a14; }
 
-@keyframes fe-net-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(255, 170, 60, 0.55); }
-  70% { box-shadow: 0 0 0 7px rgba(255, 170, 60, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(255, 170, 60, 0); }
-}
 @keyframes fe-banner-in {
   from { opacity: 0; transform: translateY(-100%); }
   to { opacity: 1; transform: translateY(0); }
@@ -621,14 +612,9 @@ html[data-desktop='1'] .net-banner { top: 34px; }
 .chatbg-drawer .sheet-body { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
 
 /* ---------- 设置页：从聊天页跳过来时闪一下 ---------- */
-@keyframes fe-card-flash {
-  0% { box-shadow: 0 0 0 0 rgba(91, 140, 255, 0.42); border-color: var(--brand); }
-  55% { box-shadow: 0 0 0 6px rgba(91, 140, 255, 0.14); border-color: var(--brand); }
-  100% { box-shadow: 0 0 0 0 rgba(91, 140, 255, 0); }
-}
 .settings-card.flash {
-  animation: fe-card-flash 1.1s var(--ease, ease) 2;
-  border-color: color-mix(in srgb, var(--brand) 55%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--brand) 50%, transparent);
+  outline-offset: 2px;
 }
 
 /* ---------- 手机 ---------- */
@@ -665,52 +651,70 @@ html[data-desktop='1'] .net-banner { top: 34px; }
 
 @media (prefers-reduced-motion: reduce) {
   .net-banner,
-  .net-banner-dot,
   .conv-typing-dots i,
-  .chat-head-sub.typing .typing-dots i,
-  .settings-card.flash { animation: none; }
+  .chat-head-sub.typing .typing-dots i { animation: none; }
   .msg-merge,
   .merge-item-forward,
   .chatbg-settings-link { transition: none; }
 }
 
-/* ===== v0.10.38：全站浮层可见的进/出动画（手机+浅色主题同样生效） ===== */
-/* 打开动画：所有浮层统一 0.6s 优雅淡入 */
-.overlay:not(.is-closing) { animation: fe-overlay-in 600ms cubic-bezier(.22,.61,.36,1) both !important; }
-.overlay .modal:not(.is-closing) { animation: fe-modal-in 600ms cubic-bezier(.22,.61,.36,1) both !important; }
-.overlay .drawer:not(.is-closing) { animation: fe-drawer-in 600ms cubic-bezier(.22,.61,.36,1) both !important; }
-.ctx-layer:not(.is-closing) .ctx-menu, .ctx-layer:not(.is-closing) .ctx-sheet { animation: fe-menu-in 520ms cubic-bezier(.22,.61,.36,1) both !important; }
-.imgviewer:not(.is-closing) { animation: fe-overlay-in 600ms cubic-bezier(.22,.61,.36,1) both !important; }
-
-/* 关闭动画：0.6s 淡出，肉眼清楚可见 */
-.overlay.is-closing { animation: fe-overlay-out 600ms cubic-bezier(.4,0,.7,.3) forwards !important; pointer-events: none; }
-.overlay.is-closing .modal { animation: fe-modal-out 600ms cubic-bezier(.4,0,.7,.3) forwards !important; }
-.overlay.is-closing .drawer { animation: fe-drawer-out2 600ms cubic-bezier(.4,0,.7,.3) forwards !important; }
-.ctx-layer.is-closing { animation: fe-overlay-out 520ms forwards !important; pointer-events: none; }
-.ctx-layer.is-closing .ctx-menu, .ctx-layer.is-closing .ctx-sheet { animation: fe-menu-out 520ms cubic-bezier(.4,0,.7,.3) forwards !important; }
-.imgviewer.is-closing { animation: fe-overlay-out 600ms forwards !important; pointer-events: none; }
-
-@keyframes fe-overlay-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes fe-overlay-out { from { opacity: 1; } to { opacity: 0; } }
-@keyframes fe-modal-in { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
-@keyframes fe-modal-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(14px) scale(.97); } }
-@keyframes fe-drawer-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
-@keyframes fe-drawer-out2 { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(28px); } }
-@keyframes fe-menu-in { from { opacity: 0; transform: scale(.94) translateY(-6px); } to { opacity: 1; transform: none; } }
-@keyframes fe-menu-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.94) translateY(-6px); } }
-
-/* 侧边栏切换动画：主内容区与侧栏按钮状态平滑过渡 */
-.app-main > * { animation: fe-page-in2 620ms cubic-bezier(.22,.61,.36,1) both !important; }
-@keyframes fe-page-in2 { from { opacity: 0; transform: translate3d(0, 10px, 0); } to { opacity: 1; transform: none; } }
-.rail-btn, .mobile-tab { transition: transform 560ms cubic-bezier(.22,.61,.36,1), background 560ms, color 560ms !important; }
-.rail-btn.on, .mobile-tab.on { animation: fe-rail-pop 600ms cubic-bezier(.22,.61,.36,1) both; }
-@keyframes fe-rail-pop { 0% { transform: scale(.9); } 60% { transform: scale(1.08); } 100% { transform: none; } }
-
-/* 手机端不再屏蔽：覆盖 pages.css 的旧规则（本文件在 pages 之后加载） */
-@media (max-width: 779px) {
-  .overlay, .overlay .modal, .overlay .drawer, .ctx-menu, .ctx-sheet {
-    animation-duration: 600ms !important;
+/* ---------- 统一节奏：主页面、浮层、短反馈 ---------- */
+/* 不移动页面或滚动视口，避免改变 fixed/sticky 的定位与触摸滚动坐标。 */
+.app-main > :is(.contacts-tab, .discover-tab, .settings-page, .admin-page),
+.plaza-page {
+  animation: fe-page-arrive var(--motion-page) var(--motion-ease);
+}
+@media (min-width: 760px) {
+  .app-main > .chat-tab { animation: fe-page-arrive var(--motion-page) var(--motion-ease); }
+}
+@media (max-width: 759px) {
+  .chat-tab > .conv-column {
+    animation: fe-page-arrive var(--motion-page) var(--motion-ease);
   }
 }
-/* 浅色主题同样保留动画（只换配色不换动画） */
-:root[data-theme='light'] .overlay, :root[data-theme='light'] .modal { animation-duration: 600ms !important; }
+@keyframes fe-page-arrive { from { opacity: .45; } }
+
+/* 透明度只在外层过渡一次；面板用同一曲线轻移，提前关闭则按当前进度折返。 */
+.motion-layer {
+  --motion-duration: var(--motion-overlay);
+  --motion-origin: translateY(12px) scale(.985);
+  opacity: 1;
+  transition: opacity var(--motion-duration) var(--motion-ease);
+}
+.overlay-drawer { --motion-origin: translateX(28px); }
+.ctx-layer.motion-layer {
+  --motion-duration: var(--motion-menu);
+  --motion-origin: translateY(5px) scale(.97);
+}
+.ctx-layer-mobile.motion-layer { --motion-origin: translateY(24px); }
+.motion-layer > .motion-surface {
+  transform: none;
+  transition: transform var(--motion-duration) var(--motion-ease), background-color 300ms var(--ease), border-color 300ms var(--ease), color 300ms var(--ease);
+}
+.motion-layer:is(.is-entering, .is-closing) { opacity: 0; }
+.motion-layer:is(.is-entering, .is-closing) > .motion-surface { transform: var(--motion-origin); }
+.motion-layer.is-closing { pointer-events: none; }
+.toast.motion-layer {
+  --motion-duration: var(--motion-feedback);
+  transform: none;
+  transition: opacity var(--motion-duration) var(--motion-ease), transform var(--motion-duration) var(--motion-ease);
+}
+.toast.motion-layer:is(.is-entering, .is-closing) { transform: translateY(-5px); }
+.motion-layer.is-entering,
+.motion-layer.is-entering > .motion-surface { transition: none; }
+
+/* 这些反馈仅在状态出现时淡入，不把持续轮询或整个卡片列表当作新进场。 */
+:is(.app-shell, .motion-surface) :is(.form-error, .form-ok, .auth-error),
+.msg-failed, .msg-recalled {
+  animation: fe-feedback-in var(--motion-feedback) var(--motion-ease);
+}
+@keyframes fe-feedback-in { from { opacity: .4; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-main > :is(.chat-tab, .contacts-tab, .discover-tab, .settings-page, .admin-page),
+  .plaza-page,
+  .chat-tab > .conv-column,
+  :is(.app-shell, .motion-surface) :is(.form-error, .form-ok, .auth-error),
+  .msg-failed, .msg-recalled { animation: none; }
+  .motion-layer, .motion-layer > .motion-surface, .toast.motion-layer { transition: none; }
+}

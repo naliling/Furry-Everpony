@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
-import { Avatar, Badge, Empty, Modal, SkeletonList, Spinner, Tabs, Toggle, toast } from '../../ui/primitives.jsx';
+import { Avatar, Badge, Empty, Modal, OverlayDismissButton, SkeletonList, Spinner, Tabs, Toggle, toast } from '../../ui/primitives.jsx';
 import { api, serverBase } from '../../lib/api.js';
 
 export default function DiscoverTab({ token, me, initialView, onBotSession, onOpenConversation }) {
@@ -328,7 +328,7 @@ function BotDetail({ token, me, bot, own, remote, isFriend, initialTab = 'overvi
           <p className="modal-hint">接入框架时作为 Token 使用，不要外传。重新生成后旧令牌立即失效。</p>
           <CopyRow label="令牌" value={bot.token || '（列表里没有返回，请重新生成）'} onCopy={onCopy} />
           <div className="modal-foot">
-            <button type="button" className="btn btn-ghost" onClick={() => setTokenOpen(false)}>关闭</button>
+            <OverlayDismissButton className="btn btn-ghost">关闭</OverlayDismissButton>
             <button type="button" className="btn btn-primary" onClick={async () => {
               try { const r = await api('/api/bots/' + bot.number + '/token', { method: 'POST', token }); onCopy(r.token); onChanged?.(); } catch (err) { toast(err.message, 'error'); }
             }}><Icon name="refresh" size={15} /> 重新生成并复制</button>
@@ -515,7 +515,7 @@ function CreateBotModal({ token, onClose, onCreated }) {
 
       </div>
       <div className="modal-foot">
-        <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
+        <OverlayDismissButton className="btn btn-ghost">取消</OverlayDismissButton>
         <button type="button" className="btn btn-primary" disabled={!valid || busy} onClick={submit}>{busy ? <Spinner size={15} /> : <Icon name="bot" size={16} />} 创建</button>
       </div>
     </Modal>

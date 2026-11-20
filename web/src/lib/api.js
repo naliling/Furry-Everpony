@@ -87,7 +87,7 @@ export function apiUrl(path) {
 }
 
 /* ---------- 网络 ---------- */
-export async function api(path, { method = 'GET', body, token } = {}) {
+export async function api(path, { method = 'GET', body, token, signal, timeoutMs } = {}) {
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   let payload;
@@ -97,18 +97,41 @@ export async function api(path, { method = 'GET', body, token } = {}) {
     headers['Content-Type'] = 'application/json';
     payload = JSON.stringify(body);
   }
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const abort = () => controller.abort(signal.reason);
+  if (controller && signal?.aborted) abort();
+  else if (controller && signal) signal.addEventListener('abort', abort, { once: true });
+  let expired = false;
+  const timer = controller ? setTimeout(() => { expired = true; controller.abort(); }, timeoutMs) : null;
+  const requestSignal = controller?.signal || signal;
   let res;
+  let data;
   try {
-    res = await fetch(apiUrl(path), { method, headers, body: payload });
-  } catch {
-    netFail('连不上服务器，正在重试');
-    throw new Error('网络连接失败，请稍后重试');
+    res = await fetch(apiUrl(path), { method, headers, body: payload, signal: requestSignal });
+    data = await res.json().catch((err) => {
+      if (requestSignal?.aborted) throw err;
+      return {};
+    });
+  } catch (err) {
+    // 页面离开、搜索换词造成的取消，不是掉线。
+    if (signal?.aborted) throw err;
+    netFail(expired ? '请求超时' : '连不上服务器，正在重试');
+    const error = new Error(expired ? '请求超时，请稍后重试' : '网络连接失败，请稍后重试');
+    error.code = expired ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR';
+    throw error;
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    if (controller && signal) signal.removeEventListener('abort', abort);
   }
-  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status >= 500) netFail(data.error || `服务器开小差（${res.status}）`);
+    const code = typeof data?.code === 'string' ? data.code : undefined;
+    if (res.status >= 500 && !code?.startsWith('SMTP_')) netFail(data?.error || `服务器开小差（${res.status}）`);
     else netOk();
-    throw new Error(data.error || `请求失败（${res.status}）`);
+    const error = new Error(data?.error || `请求失败（${res.status}）`);
+    error.status = res.status;
+    error.code = code;
+    if (Number.isFinite(data?.retryAfter)) error.retryAfter = data.retryAfter;
+    throw error;
   }
   netOk();
   return data;

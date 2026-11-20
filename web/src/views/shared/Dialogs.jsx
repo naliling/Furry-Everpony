@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
-import { Modal, Avatar, Empty, Spinner, toast } from '../../ui/primitives.jsx';
+import { Modal, OverlayDismissButton, Avatar, Empty, Spinner, toast } from '../../ui/primitives.jsx';
 import { api } from '../../lib/api.js';
 import { QrCode, QrScanner } from '../../ui/qr.jsx';
 import { fmtClock, fmtDate, relTime } from '../../lib/format.js';
@@ -199,7 +199,7 @@ export function AddFriendModal({ token, onClose, onChanged }) {
       </div>
 
       <div className="modal-foot">
-        <button type="button" className="btn btn-ghost" onClick={onClose}>{done ? '关闭' : '取消'}</button>
+        <OverlayDismissButton className="btn btn-ghost">{done ? '关闭' : '取消'}</OverlayDismissButton>
       </div>
 
       {scanning ? (
@@ -263,7 +263,7 @@ export function CreateGroupModal({ token, onClose, onCreated }) {
         <span className="field-hint">群号在本实例内唯一，好友可以靠它找到群。</span>
       </label>
       <div className="modal-foot">
-        <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
+        <OverlayDismissButton className="btn btn-ghost">取消</OverlayDismissButton>
         <button type="button" className="btn btn-primary" disabled={!valid || busy} onClick={submit}>
           {busy ? <Spinner size={15} /> : <Icon name="group" size={16} />} 创建
         </button>
@@ -312,7 +312,7 @@ export function JoinGroupModal({ token, onClose, onJoined }) {
         <span className="field-hint">如果群主开了邀请制，可以让群内成员邀请你。</span>
       </label>
       <div className="modal-foot">
-        <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
+        <OverlayDismissButton className="btn btn-ghost">取消</OverlayDismissButton>
         <button type="button" className="btn btn-primary" disabled={!valid || busy} onClick={submit}>
           {busy ? <Spinner size={15} /> : <Icon name="plus" size={16} />} 加入
         </button>
@@ -528,7 +528,7 @@ export function GroupInviteModal({ token, group, onClose, onChanged }) {
         </div>
       </label>
       <div className="modal-foot">
-        <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
+        <OverlayDismissButton className="btn btn-ghost">取消</OverlayDismissButton>
         <button type="button" className="btn btn-primary" disabled={!valid || busy} onClick={submit}>
           {busy ? <Spinner size={15} /> : <Icon name="send" size={16} />} 发送邀请
         </button>

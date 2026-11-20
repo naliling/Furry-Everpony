@@ -1,199 +1,217 @@
 import net from 'node:net';
 import tls from 'node:tls';
+import { describeMailConfig, isMailAddress } from './mail-config.js';
 
-/**
- * 零依赖 SMTP 发信（不引 nodemailer，打包不需要额外模块）。
- * 支持三种常见配置：
- *   - 465 端口：连上就是 TLS（secure = true）
- *   - 587 端口：明文连上后 STARTTLS 升级（secure = false，但服务器支持就升级）
- *   - 25 端口：明文，一般不认证（内网自建邮件服务器）
- * 只做最小可用集：EHLO / STARTTLS / AUTH LOGIN / MAIL / RCPT / DATA / QUIT。
- */
+const ERRORS = {
+  SMTP_DNS_FAILED: '无法解析 SMTP 主机名，请检查服务器地址和 DNS。',
+  SMTP_CONNECTION_FAILED: '连接 SMTP 服务器失败，请检查端口、出站网络和防火墙。',
+  SMTP_TIMEOUT: 'SMTP 响应超时，请检查出站网络和端口对应的加密方式。',
+  SMTP_TLS_FAILED: 'SMTP TLS 握手或证书校验失败，请核对主机名、端口和证书链。',
+  SMTP_STARTTLS_REQUIRED: '服务器未声明 STARTTLS，未发送登录信息或邮件。请核对端口和加密方式。',
+  SMTP_STARTTLS_REJECTED: '服务器拒绝升级到 STARTTLS，请核对端口及服务商设置。',
+  SMTP_AUTH_UNSUPPORTED: 'SMTP 服务器未声明 AUTH LOGIN；请检查服务商的 SMTP 认证设置。',
+  SMTP_AUTH_REJECTED: 'SMTP 服务商拒绝认证。请确认已启用 SMTP、授权码或应用专用密码仍有效，且与登录名匹配。',
+  SMTP_SENDER_REJECTED: 'SMTP 服务商拒绝发件人，请核对发件地址是否经登录账号授权。',
+  SMTP_RECIPIENT_REJECTED: 'SMTP 服务商拒绝收件人，请检查收件地址、转发权限或服务商限制。',
+  SMTP_MESSAGE_REJECTED: 'SMTP 服务商拒收邮件，请检查发送额度、内容策略和发信权限。',
+  SMTP_PROTOCOL_FAILED: 'SMTP 服务器响应异常，请核对服务器地址、端口和服务商状态。',
+  SMTP_RECIPIENT_INVALID: '收件邮箱格式不对。',
+};
+
+class MailError extends Error {
+  constructor(code, message = ERRORS[code], smtpStatus) {
+    super(message);
+    this.code = code;
+    this.smtpStatus = smtpStatus;
+  }
+}
+
+/* 不透传服务端响应正文或低层异常：可能含邮箱、账号或供应商诊断数据。 */
+export function mailFailure(err) {
+  const safe = err instanceof MailError ? err : new MailError('SMTP_PROTOCOL_FAILED');
+  return { code: safe.code, error: safe.message, ...(safe.smtpStatus ? { smtpStatus: safe.smtpStatus } : {}) };
+}
 
 function makeReader(sock) {
   let buf = '';
-  const queue = [];
-  let waiter = null;
-  let closed = false;
+  let responseCode = 0;
+  let size = 0;
+  let lines = [];
+  const pending = [];
+  let waiter;
+  let failure;
 
-  const feed = () => {
-    /* SMTP 多行响应：250-xxx 继续，250 xxx 结束 */
-    for (;;) {
+  function fail(err) {
+    failure ||= err;
+    if (waiter) {
+      const { reject } = waiter;
+      waiter = undefined;
+      reject(failure);
+    }
+  }
+  const close = () => fail(new MailError('SMTP_CONNECTION_FAILED'));
+  function feed(chunk) {
+    buf += chunk.toString('utf8');
+    if (size + buf.length > 32768) return fail(new MailError('SMTP_PROTOCOL_FAILED'));
+    while (!failure) {
       const idx = buf.indexOf('\n');
       if (idx < 0) return;
-      const line = buf.slice(0, idx + 1);
+      const line = buf.slice(0, idx).replace(/\r$/, '');
       buf = buf.slice(idx + 1);
-      queue.push(line);
-      const m = /^(\d{3})([ -])/.exec(line);
-      if (m && m[2] === ' ') {
-        const all = queue.join('');
-        queue.length = 0;
-        const code = Number(m[1]);
-        if (waiter) {
-          const w = waiter;
-          waiter = null;
-          w.resolve({ code, text: all });
-        } else {
-          pending.push({ code, text: all });
-        }
+      const match = /^(\d{3})(?:([ -])(.*))?$/.exec(line);
+      const code = Number(match?.[1]);
+      if (!match || (responseCode && code !== responseCode) || pending.length >= 4) {
+        return fail(new MailError('SMTP_PROTOCOL_FAILED'));
+      }
+      responseCode = code;
+      size += idx + 1;
+      lines.push(match[3] || '');
+      if (match[2] === '-') continue;
+      const response = { code, lines };
+      lines = [];
+      size = 0;
+      responseCode = 0;
+      if (waiter) {
+        const { resolve } = waiter;
+        waiter = undefined;
+        resolve(response);
+      } else {
+        pending.push(response);
       }
     }
-  };
-  const pending = [];
-
-  sock.on('data', (chunk) => {
-    buf += chunk.toString('utf8');
-    feed();
-  });
-  sock.on('error', (err) => {
-    closed = true;
-    if (waiter) {
-      const w = waiter;
-      waiter = null;
-      w.reject(err);
-    }
-  });
-  sock.on('close', () => {
-    closed = true;
-    if (waiter) {
-      const w = waiter;
-      waiter = null;
-      w.reject(new Error('连接被服务器关闭'));
-    }
-  });
-
-  return {
-    read(timeoutMs = 15000) {
-      if (pending.length) return Promise.resolve(pending.shift());
-      if (closed) return Promise.reject(new Error('连接已关闭'));
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          waiter = null;
-          reject(new Error('等待服务器响应超时'));
-        }, timeoutMs);
-        waiter = {
-          resolve: (v) => { clearTimeout(timer); resolve(v); },
-          reject: (e) => { clearTimeout(timer); reject(e); },
-        };
-      });
-    },
-    reset() {
-      buf = '';
-      queue.length = 0;
-      pending.length = 0;
-    },
-  };
-}
-
-function once(emitter, event) {
-  return new Promise((resolve, reject) => {
-    emitter.once(event, (...args) => resolve(args));
-    emitter.once('error', reject);
-  });
-}
-
-/**
- * 发一封纯文本邮件。
- * cfg: { host, port, secure, user, pass, from, fromName }
- * 返回 { ok: true } 或抛错（错误信息直接给前端看）。
- */
-export async function sendMail(cfg, { to, subject, text }) {
-  const host = String(cfg.host || '').trim();
-  const port = Number(cfg.port) || (cfg.secure ? 465 : 587);
-  const user = String(cfg.user || '').trim();
-  const pass = String(cfg.pass || '');
-  const from = String(cfg.from || user || '').trim();
-  if (!host) throw new Error('没配 SMTP 服务器地址');
-  if (!from) throw new Error('没配发件邮箱');
-  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error('收件邮箱格式不对');
-
-  let sock;
-  if (cfg.secure || port === 465) {
-    sock = tls.connect({ host, port, servername: host, rejectUnauthorized: false });
-    await once(sock, 'secureConnect');
-  } else {
-    sock = net.connect({ host, port });
-    await once(sock, 'connect');
   }
-
-  let reader = makeReader(sock);
-  const send = (line) => new Promise((resolve) => sock.write(line + '\r\n', resolve));
-
-  const expect = async (codes, what) => {
-    const r = await reader.read();
-    if (!codes.includes(r.code)) {
-      throw new Error(what + '失败（' + r.code + '）：' + r.text.trim().slice(0, 200));
-    }
-    return r;
+  sock.on('data', feed);
+  sock.on('error', fail);
+  sock.on('close', close);
+  return {
+    read() {
+      if (pending.length) return Promise.resolve(pending.shift());
+      if (failure) return Promise.reject(failure);
+      return new Promise((resolve, reject) => { waiter = { resolve, reject }; });
+    },
+    detach() {
+      sock.off('data', feed);
+      sock.off('error', fail);
+      sock.off('close', close);
+    },
   };
+}
 
+function waitFor(sock, event) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      sock.off(event, done);
+      sock.off('error', fail);
+      sock.off('close', close);
+    };
+    const done = () => { cleanup(); resolve(); };
+    const fail = (err) => { cleanup(); reject(err); };
+    const close = () => fail(new MailError('SMTP_CONNECTION_FAILED'));
+    sock.once(event, done);
+    sock.once('error', fail);
+    sock.once('close', close);
+  });
+}
+
+const write = (sock, line) => new Promise((resolve, reject) => {
+  sock.write(line + '\r\n', (err) => err ? reject(err) : resolve());
+});
+
+function transportError(err, inTlsHandshake) {
+  if (err instanceof MailError) return err;
+  const code = String(err?.code || '');
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return new MailError('SMTP_DNS_FAILED');
+  if (code === 'ETIMEDOUT') return new MailError('SMTP_TIMEOUT');
+  if (/^(ECONN|EHOST|ENET|EPIPE)/.test(code)) return new MailError('SMTP_CONNECTION_FAILED');
+  if (inTlsHandshake || /^(ERR_SSL|ERR_TLS|CERT_|UNABLE_TO_|SELF_SIGNED|DEPTH_ZERO)/.test(code)) {
+    return new MailError('SMTP_TLS_FAILED');
+  }
+  return new MailError('SMTP_PROTOCOL_FAILED');
+}
+
+/** 使用 TLS 直连或强制 STARTTLS；只有配置明确不需要认证时才跳过 AUTH。 */
+export async function sendMail(cfg, { to, subject, text }, { timeoutMs = 12000 } = {}) {
+  const { ready, issues, from } = describeMailConfig(cfg);
+  if (!ready) throw new MailError(issues[0].code, issues[0].message);
+  if (!isMailAddress(to)) throw new MailError('SMTP_RECIPIENT_INVALID');
+  const { host, port, user, pass, secure } = cfg;
+  const tlsOptions = { host, port, servername: net.isIP(host) ? undefined : host.replace(/\.$/, ''), rejectUnauthorized: true };
+  let sock;
+  let reader;
+  let inTlsHandshake = secure;
+  const sockets = new Set();
+  const track = (socket) => {
+    sockets.add(socket);
+    /* 升级和关闭期间也要接收异步错误；实际错误由 reader / waitFor 分类。 */
+    socket.on('error', () => {});
+    sock = socket;
+    reader = makeReader(socket);
+  };
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    for (const socket of sockets) socket.destroy(new MailError('SMTP_TIMEOUT'));
+  }, timeoutMs);
+  const expect = async (codes, failureCode = 'SMTP_PROTOCOL_FAILED') => {
+    const response = await reader.read();
+    if (!codes.includes(response.code)) throw new MailError(failureCode, undefined, response.code);
+    return response;
+  };
+  const command = async (line, codes, failureCode) => {
+    await write(sock, line);
+    return expect(codes, failureCode);
+  };
   try {
-    await expect([220], '连接');
-    await send('EHLO everony.local');
-    let ehlo = await expect([250], 'EHLO');
-
-    const supportsStartTls = /STARTTLS/i.test(ehlo.text);
-    if (!cfg.secure && port !== 465 && supportsStartTls) {
-      await send('STARTTLS');
-      await expect([220], 'STARTTLS');
-      sock = tls.connect({ socket: sock, servername: host, rejectUnauthorized: false });
-      await once(sock, 'secureConnect');
-      reader = makeReader(sock);
-      await send('EHLO everony.local');
-      ehlo = await expect([250], 'EHLO');
+    track(secure ? tls.connect(tlsOptions) : net.connect({ host, port }));
+    await waitFor(sock, secure ? 'secureConnect' : 'connect');
+    inTlsHandshake = false;
+    await expect([220]);
+    let ehlo = await command('EHLO everony.local', [250]);
+    if (!secure) {
+      if (!ehlo.lines.some((line) => /^STARTTLS(?:\s|$)/i.test(line))) throw new MailError('SMTP_STARTTLS_REQUIRED');
+      await command('STARTTLS', [220], 'SMTP_STARTTLS_REJECTED');
+      reader.detach();
+      inTlsHandshake = true;
+      track(tls.connect({ ...tlsOptions, socket: sock }));
+      await waitFor(sock, 'secureConnect');
+      inTlsHandshake = false;
+      ehlo = await command('EHLO everony.local', [250]);
     }
 
     if (user) {
-      await send('AUTH LOGIN');
-      await expect([334], 'AUTH');
-      await send(Buffer.from(user, 'utf8').toString('base64'));
-      await expect([334], 'AUTH 用户名');
-      await send(Buffer.from(pass, 'utf8').toString('base64'));
-      await expect([235], '登录');
+      const login = ehlo.lines.some((line) => /^AUTH[= \t]/i.test(line) && line.slice(5).toUpperCase().split(/\s+/).includes('LOGIN'));
+      if (!login) throw new MailError('SMTP_AUTH_UNSUPPORTED');
+      await command('AUTH LOGIN', [334], 'SMTP_AUTH_REJECTED');
+      await command(Buffer.from(user, 'utf8').toString('base64'), [334], 'SMTP_AUTH_REJECTED');
+      await command(Buffer.from(pass, 'utf8').toString('base64'), [235], 'SMTP_AUTH_REJECTED');
     }
 
-    await send('MAIL FROM:<' + from + '>');
-    await expect([250], 'MAIL FROM');
-    await send('RCPT TO:<' + to + '>');
-    await expect([250, 251], 'RCPT TO');
-    await send('DATA');
-    await expect([354], 'DATA');
+    await command('MAIL FROM:<' + from + '>', [250], 'SMTP_SENDER_REJECTED');
+    await command('RCPT TO:<' + to + '>', [250, 251], 'SMTP_RECIPIENT_REJECTED');
+    await command('DATA', [354], 'SMTP_MESSAGE_REJECTED');
 
-    const fromName = String(cfg.fromName || 'Everony').trim();
-    const subjectEncoded = '=?UTF-8?B?' + Buffer.from(String(subject), 'utf8').toString('base64') + '?=';
+    const encoded = (value) => '=?UTF-8?B?' + Buffer.from(String(value), 'utf8').toString('base64') + '?=';
     const body = Buffer.from(String(text), 'utf8').toString('base64');
     const headers = [
-      'From: ' + subjectEncodedFrom(fromName, from),
+      'From: ' + encoded(cfg.fromName || 'Everony') + ' <' + from + '>',
       'To: <' + to + '>',
-      'Subject: ' + subjectEncoded,
+      'Subject: ' + encoded(subject),
       'Date: ' + new Date().toUTCString(),
       'MIME-Version: 1.0',
       'Content-Type: text/plain; charset=utf-8',
       'Content-Transfer-Encoding: base64',
       'Message-ID: <' + Date.now() + '.' + Math.random().toString(36).slice(2) + '@everony.local>',
     ];
-    /* 正文按 76 字符折行，某些老邮件服务器会截断超长行 */
+    /* 正文按 76 字符折行；base64 不会产生需要点转义的行。 */
     const bodyLines = body.match(/.{1,76}/g) || [''];
-    await send(headers.join('\r\n') + '\r\n\r\n' + bodyLines.join('\r\n') + '\r\n.');
-    await expect([250], '投递');
-
-    try {
-      await send('QUIT');
-    } catch {
-      /* QUIT 失败不影响已投递的邮件 */
-    }
+    await command(headers.join('\r\n') + '\r\n\r\n' + bodyLines.join('\r\n') + '\r\n.', [250], 'SMTP_MESSAGE_REJECTED');
+    await write(sock, 'QUIT').catch(() => {});
     return { ok: true };
+  } catch (err) {
+    throw timedOut ? new MailError('SMTP_TIMEOUT') : transportError(err, inTlsHandshake);
   } finally {
-    try {
-      sock.destroy();
-    } catch {
-      /* 已关闭 */
-    }
+    clearTimeout(timer);
+    reader?.detach();
+    for (const socket of sockets) socket.destroy();
   }
-}
-
-/** From 头里带中文昵称要按 RFC 2047 编码 */
-function subjectEncodedFrom(name, email) {
-  const encoded = '=?UTF-8?B?' + Buffer.from(String(name), 'utf8').toString('base64') + '?=';
-  return encoded + ' <' + email + '>';
 }

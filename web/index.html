@@ -15,26 +15,27 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Everpony" />
     <title>Everony</title>
-    <!-- 首屏壁纸：preload 让背景和 HTML 并行下载（10KB WebP，几乎零成本） -->
-    <link rel="preload" as="image" href="/assets/aurora-1.webp" />
-  </head>
-  <body>
-    <!-- 极光壁纸层：三张 WebP 交叉淡入；省流模式/低配自动退回纯 CSS 极光 -->
-    <div class="aurora-wallpaper" aria-hidden="true">
-      <div class="wp-layer wp-1"></div>
-      <div class="wp-layer wp-2"></div>
-      <div class="wp-layer wp-3"></div>
-    </div>
+    <style>
+      html { background: #060910; color: #e9effd; }
+      html[data-theme='light'] { background: #eef3fb; color: #162541; }
+      .entry-preview { min-height: 100vh; min-height: 100svh; display: grid; place-content: center; justify-items: center; gap: 10px; font: 15px system-ui, sans-serif; }
+      .entry-preview strong { font-size: 25px; }
+      .entry-preview span { opacity: .78; }
+    </style>
     <script>
-      // 省流：用户主动设置或慢速网络时只留 CSS 极光，不跑壁纸动画
+      // 在任何样式或组件挂载前确定主题和省流偏好。
       try {
-        var lm = localStorage.getItem('fe_lite');
-        var slow = (navigator.connection && navigator.connection.saveData) ||
-          (navigator.connection && /2g/.test(navigator.connection.effectiveType || ''));
-        if (lm === '1' || slow) document.documentElement.dataset.lite = '1';
+        var prefs = document.documentElement.dataset;
+        var savedTheme = localStorage.getItem('fe_theme');
+        var connection = navigator.connection;
+        prefs.theme = savedTheme === 'light' || savedTheme === 'violet' ? savedTheme : 'deep';
+        if (localStorage.getItem('fe_lite') === '1' || (connection && (connection.saveData || /2g/.test(connection.effectiveType || '')))) prefs.lite = '1';
       } catch (e) {}
     </script>
-    <div id="root"></div>
+  </head>
+  <body>
+    <div class="aurora-wallpaper" aria-hidden="true"></div>
+    <div id="root"><div class="entry-preview" role="status"><strong>Everony</strong><span>正在打开小马聊天…</span></div></div>
     <script type="module" src="/src/main.jsx"></script>
     <script>
       // PWA：注册 Service Worker（不缓存 /api 与 /uploads，详见 /sw.js）

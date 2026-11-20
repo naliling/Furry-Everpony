@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
-import { Avatar, Badge, Confirm, ContextMenu, Empty, Modal, SkeletonList, Spinner, toast } from '../../ui/primitives.jsx';
+import { Avatar, Badge, Confirm, ContextMenu, Empty, Modal, OverlayDismissButton, SkeletonList, Spinner, toast } from '../../ui/primitives.jsx';
 import { api } from '../../lib/api.js';
 import { relTime, statusMeta } from '../../lib/format.js';
 import ProfileModal from '../shared/ProfileModal.jsx';
@@ -484,7 +484,7 @@ export default function ContactsTab({ token, me, conversations = [], onOpenConve
             <input className="input" autoFocus maxLength={20} value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') createGroup(); }} placeholder="例如：一起玩的朋友" />
           </label>
           <div className="modal-foot">
-            <button type="button" className="btn btn-ghost" onClick={() => setNewGroupName(null)}>取消</button>
+            <OverlayDismissButton className="btn btn-ghost">取消</OverlayDismissButton>
             <button type="button" className="btn btn-primary" disabled={!newGroupName.trim()} onClick={createGroup}>创建</button>
           </div>
         </Modal>
@@ -496,7 +496,7 @@ export default function ContactsTab({ token, me, conversations = [], onOpenConve
             <input className="input" autoFocus maxLength={20} value={renameGroup.name} onChange={(e) => setRenameGroup({ ...renameGroup, name: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') renameFriendGroup(); }} />
           </label>
           <div className="modal-foot">
-            <button type="button" className="btn btn-ghost" onClick={() => setRenameGroup(null)}>取消</button>
+            <OverlayDismissButton className="btn btn-ghost">取消</OverlayDismissButton>
             <button type="button" className="btn btn-primary" disabled={!renameGroup.name.trim()} onClick={renameFriendGroup}>保存</button>
           </div>
         </Modal>

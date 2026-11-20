@@ -570,9 +570,13 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
       <div
         className={'msg-list' + (chatBg ? ' has-chat-bg' : '')}
         ref={listRef}
-        style={chatBg ? { backgroundSize: bgStyle.fit === 'repeat' ? 'auto' : bgStyle.fit, backgroundPosition: bgStyle.pos, backgroundRepeat: bgStyle.fit === 'repeat' ? 'repeat' : 'no-repeat' } : undefined}
         onScroll={onScroll}
-        style={chatBg ? { backgroundImage: 'url("' + chatBg + '")' } : undefined}
+        style={chatBg ? {
+          backgroundImage: 'url("' + chatBg + '")',
+          backgroundSize: bgStyle.fit === 'repeat' ? 'auto' : bgStyle.fit,
+          backgroundPosition: bgStyle.pos,
+          backgroundRepeat: bgStyle.fit === 'repeat' ? 'repeat' : 'no-repeat',
+        } : undefined}
       >
         {loading ? (
           <div className="msg-loading"><Spinner size={20} /> 正在载入消息</div>

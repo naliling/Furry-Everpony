@@ -38,28 +38,27 @@ let adminToken=null, userToken=null;
     return r.status===200 && r.data.registerMode==='approval';
   });
 
-  await t('新注册默认进待审核（不发 token）', async()=>{
-    const r = await register('3889000002','待审','u2@example.com');
-    return r.status===200 && r.data.pending===true && !r.data.token;
-  });
-
-  await t('待审核账号登录被拒 403', async()=>{
-    const r = await j('/api/login',{method:'POST',body:{identifier:'3889000002',password:PWD}});
-    return r.status===403 && /审核/.test(r.data.error||'');
-  });
-
-  await t('管理员能看到待审核列表（含 IP 与设备）', async()=>{
-    const r = await j('/api/admin/pending',{token:adminToken});
-    const row = (r.data.pending||[])[0];
-    return r.status===200 && r.data.pending.length===1 && row.number==='3889000002' && typeof row.ip==='string' && row.ip.length>0;
-  });
-
-  await t('审核通过后可以登录', async()=>{
-    const a = await j('/api/admin/accounts/3889000002/approve',{method:'POST',token:adminToken,body:{approve:true}});
-    if (a.status!==200) return false;
-    const r = await j('/api/login',{method:'POST',body:{identifier:'3889000002',password:PWD}});
+  /* 产品已取消待审核：approval 模式下新注册也直接拿到可用 token。 */
+  await t('approval 模式新注册直接可用', async()=>{
+    const r = await register('3889000002','用户二','u2@example.com');
     userToken = r.data && r.data.token;
-    return r.status===200 && !!userToken;
+    return r.status===200 && !!userToken && r.data.pending!==true;
+  });
+
+  await t('新注册账号可以正常登录', async()=>{
+    const r = await j('/api/login',{method:'POST',body:{identifier:'3889000002',password:PWD}});
+    return r.status===200 && !!r.data.token;
+  });
+
+  await t('管理员登录记录含 IP 与设备', async()=>{
+    const r = await j('/api/admin/logins?limit=50',{token:adminToken});
+    const row = (r.data.logins||[]).find(x=>x.number==='3889000002'||x.nickname==='用户二');
+    return r.status===200 && !!row && typeof row.ip==='string' && row.ip.length>0;
+  });
+
+  await t('普通用户不能看管理员设置（403）', async()=>{
+    const r = await j('/api/admin/settings',{token:userToken});
+    return r.status===403;
   });
 
   await t('普通用户访问管理接口被拒 403', async()=>{
@@ -110,11 +109,12 @@ let adminToken=null, userToken=null;
     return r.status===403 && /关闭注册/.test(r.data.error||'');
   });
 
-  await t('拒绝审核会把这个账号删掉', async()=>{
-    await register('3889000005','要被拒','u5@example.com');
-    const a = await j('/api/admin/accounts/3889000005/approve',{method:'POST',token:adminToken,body:{approve:false}});
+  await t('管理员可以删除账号', async()=>{
+    const r = await register('3889000005','待删','u5@example.com');
+    if (r.status!==200 || !r.data.account?.id) return false;
+    const d = await j('/api/admin/accounts/3889000005/delete',{method:'POST',token:adminToken,body:{}});
     const login = await j('/api/login',{method:'POST',body:{identifier:'3889000005',password:PWD}});
-    return a.status===200 && a.data.deleted===true && (login.status===401||login.status===404);
+    return d.status===200 && (login.status===401||login.status===404);
   });
 
   await t('封禁 IP 后该 IP 被挡在门口 403', async()=>{

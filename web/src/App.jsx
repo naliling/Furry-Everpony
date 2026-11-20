@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
-import Auth from './views/Auth.jsx';
-import Shell from './views/Shell.jsx';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import PlazaPage from './views/plaza/PlazaPage.jsx';
 import Icon from './ui/icons.jsx';
 import { Spinner, Toaster, toast } from './ui/primitives.jsx';
 import NetBanner from './ui/NetBanner.jsx';
-import { ACCOUNTS_KEY, TOKEN_KEY, api, loadAccounts, rememberAccount, syncNativeToken } from './lib/api.js';
+import { TOKEN_KEY, api, loadAccounts, rememberAccount, syncNativeToken } from './lib/api.js';
+import './entry.css';
+
+const Auth = lazy(() => import('./views/Auth.jsx'));
+const Shell = lazy(() => import('./views/Shell.jsx'));
 
 /* 外观偏好：三套主题、三档字号，全部落在 :root 的 data-* 上 */
 const THEME_KEY = 'fe_theme';
@@ -54,35 +56,28 @@ function WinControls() {
   );
 }
 
-function BootSplash() {
+function BootSplash({ title = '正在连接', error, onRetry }) {
   return (
-    <div className="boot-splash">
+    <div className="boot-splash fe-entry-state">
       <span className="brand-mark brand-mark-lg"><Icon name="chat" size={26} /></span>
       <div className="boot-title">Everony</div>
-      <div className="boot-sub">正在连接你的世界</div>
-      <Spinner size={20} />
+      <div className="boot-sub" role={error ? 'alert' : 'status'}>{error || title}</div>
+      {error ? <button type="button" className="btn btn-primary btn-sm" onClick={onRetry}>重试连接</button> : <Spinner size={20} />}
     </div>
-  );
-}
-
-/* 添加账号时 Auth 是全屏的，给一个回到聊天的浮层按钮 */
-function BackToChat({ onClick }) {
-  return (
-    <button type="button" className="auth-back btn btn-ghost" onClick={onClick}>
-      <Icon name="back" size={16} /> 回到聊天
-    </button>
   );
 }
 
 export default function App() {
   const [theme, setTheme] = useState(readTheme);
   const [font, setFont] = useState(readFont);
-  const [token, setToken] = useState(() => DEV_TOKEN || (localStorage.getItem(TOKEN_KEY) || null));
-  const [account, setAccount] = useState(null);
-  const [ready, setReady] = useState(false);
+  const [token, setToken] = useState(() => {
+    try { return DEV_TOKEN || localStorage.getItem(TOKEN_KEY) || null; } catch { return DEV_TOKEN; }
+  });
+  const [session, setSession] = useState(null);
   const [adding, setAdding] = useState(false);
-  /* 未登录时先看广场，点了登录/注册才进表单 */
-  const [guestAuth, setGuestAuth] = useState(false);
+  /* 未登录时先看广场，点了登录/注册才下载表单界面 */
+  const [guestAuth, setGuestAuth] = useState(null);
+  const account = session?.token === token ? session.account : null;
   const [accounts, setAccounts] = useState(loadAccounts);
 
   useEffect(() => {
@@ -101,39 +96,35 @@ export default function App() {
   }, [theme, font]);
 
   useEffect(() => {
-    if (!token) {
-      setAccount(null);
-      setReady(true);
-      return undefined;
-    }
-    let alive = true;
-    setReady(false);
-    api('/api/me', { token })
+    if (!token || session?.token === token) return undefined;
+    const controller = new AbortController();
+    api('/api/me', { token, signal: controller.signal, timeoutMs: 6000 })
       .then((data) => {
-        if (!alive) return;
-        setAccount(data.account);
+        if (controller.signal.aborted) return;
+        if (!data?.account) throw new Error('会话信息读取失败，请重试');
+        setSession({ token, account: data.account });
         setAccounts(loadAccounts());
       })
-      .catch(() => {
-        if (!alive) return;
-        try { localStorage.removeItem(TOKEN_KEY); } catch { /* 忽略 */ }
-        setToken(null);
-        setAccount(null);
-      })
-      .finally(() => { if (alive) setReady(true); });
-    return () => { alive = false; };
-  }, [token]);
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        if (err.status === 401) {
+          try { if (localStorage.getItem(TOKEN_KEY) === token) localStorage.removeItem(TOKEN_KEY); } catch { /* 忽略 */ }
+          syncNativeToken('');
+          setToken(null);
+          setSession(null);
+        } else {
+          setSession({ token, error: err.message });
+        }
+      });
+    return () => controller.abort();
+  }, [token, session]);
 
   const onAuthed = useCallback((data) => {
-    try {
-      localStorage.setItem(TOKEN_KEY, data.token);
-      localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(loadAccounts()));
-    } catch {
-      /* 忽略 */
-    }
+    try { localStorage.setItem(TOKEN_KEY, data.token); } catch { /* 忽略 */ }
     setAccounts(loadAccounts());
     setToken(data.token);
-    setAccount(data.account);
+    setSession({ token: data.token, account: data.account });
+    setGuestAuth(null);
     setAdding(false);
     syncNativeToken(data.token);
   }, []);
@@ -141,7 +132,7 @@ export default function App() {
   const switchAccount = useCallback(({ token: nextToken, account: nextAccount }) => {
     try { localStorage.setItem(TOKEN_KEY, nextToken); } catch { /* 忽略 */ }
     setToken(nextToken);
-    setAccount(nextAccount);
+    setSession({ token: nextToken, account: nextAccount });
     syncNativeToken(nextToken);
     toast('已切换账号', 'success');
   }, []);
@@ -150,84 +141,69 @@ export default function App() {
     try {
       localStorage.setItem(TOKEN_KEY, nextToken);
       rememberAccount(nextAccount, nextToken);
-    } catch {
-      /* 忽略 */
-    }
+    } catch { /* 忽略 */ }
     setAccounts(loadAccounts());
     setToken(nextToken);
-    setAccount(nextAccount);
+    setSession({ token: nextToken, account: nextAccount });
     syncNativeToken(nextToken);
     toast('已切换为 ' + (nextAccount?.nickname || 'Bot'), 'success');
   }, []);
 
   const logout = useCallback(async () => {
-    try { await api('/api/logout', { method: 'POST', token }); } catch { /* 忽略 */ }
+    try { await api('/api/logout', { method: 'POST', token, timeoutMs: 5000 }); } catch { /* 忽略 */ }
     try { localStorage.removeItem(TOKEN_KEY); } catch { /* 忽略 */ }
     syncNativeToken('');
     setToken(null);
-    setAccount(null);
+    setSession(null);
+    setGuestAuth(null);
   }, [token]);
 
   const authProps = { theme, onTheme: setTheme, font, onFont: setFont, onAuthed };
 
-  if (!ready) {
-    return (
+  let page;
+  if (token && !account) {
+    page = <BootSplash error={session?.error} onRetry={() => setSession(null)} />;
+  } else if (adding) {
+    page = (
+      <Suspense fallback={<BootSplash title="正在打开登录" />}>
+        <Auth {...authProps} onBack={() => setAdding(false)} backLabel="回到聊天" />
+      </Suspense>
+    );
+  } else if (!token && guestAuth) {
+    page = (
+      <Suspense fallback={<BootSplash title={guestAuth === 'register' ? '正在打开注册' : '正在打开登录'} />}>
+        <Auth {...authProps} initialMode={guestAuth} onBack={() => setGuestAuth(null)} />
+      </Suspense>
+    );
+  } else if (!token) {
+    page = <PlazaPage onLogin={() => setGuestAuth('login')} onRegister={() => setGuestAuth('register')} />;
+  } else {
+    page = (
       <>
-        <WinControls />
-        <BootSplash />
+        <NetBanner />
+        <Suspense fallback={<BootSplash title="正在打开聊天" />}>
+          <Shell
+            key={token}
+            token={token}
+            me={account}
+            accounts={accounts}
+            theme={theme}
+            onTheme={setTheme}
+            font={font}
+            onFont={setFont}
+            onSwitchAccount={switchAccount}
+            onAddAccount={() => setAdding(true)}
+            onLogout={logout}
+            onBotSession={onBotSession}
+          />
+        </Suspense>
       </>
     );
   }
-
-  if (adding) {
-    return (
-      <>
-        <WinControls />
-        <Auth {...authProps} />
-        <BackToChat onClick={() => setAdding(false)} />
-      </>
-    );
-  }
-
-  if (!token || !account) {
-    if (!guestAuth) {
-      return (
-        <>
-          <WinControls />
-          <PlazaPage onLogin={() => setGuestAuth(true)} />
-          <Toaster />
-        </>
-      );
-    }
-    return (
-      <>
-        <WinControls />
-        <Auth {...authProps} />
-        <button type="button" className="auth-back-plaza" onClick={() => setGuestAuth(false)}>
-          <Icon name="back" size={15} /> 回广场逛逛
-        </button>
-        <Toaster />
-      </>
-    );
-  }
-
   return (
     <>
       <WinControls />
-      <NetBanner />
-      <Shell
-        token={token}
-        me={account}
-        accounts={accounts}
-        theme={theme}
-        onTheme={setTheme}
-        font={font}
-        onFont={setFont}
-        onSwitchAccount={switchAccount}
-        onAddAccount={() => setAdding(true)}
-        onLogout={logout}
-        onBotSession={onBotSession}
-      />
+      {page}
       <Toaster />
     </>
   );

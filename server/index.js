@@ -1,8 +1,9 @@
 import Fastify from 'fastify';
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { registerWebStatic } from './web-static.js';
+import { randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces } from 'node:os';
-import { dirname, extname, join, normalize } from 'node:path';
+import { dirname, extname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { openDb } from './db.js';
@@ -13,23 +14,11 @@ import { createFederation, normalizeAddr, parseInvite } from './federation.js';
 import { createRelayClient, normalizeRelayUrl } from './relay-client.js';
 import { createRelayHost } from './relay-host.js';
 import { collectAccount, openPackage, restoreAccount, sealPackage } from './backup.js';
-import { sendMail } from './mail.js';
+import { mailFailure, sendMail } from './mail.js';
+import { describeMailConfig, isMailAddress, isMailHost, readMailConfig } from './mail-config.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = join(HERE, '..', 'dist', 'web');
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.webmanifest': 'application/manifest+json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.webp': 'image/webp',
-};
 
 /** 运行数据目录（数据库所在目录；Electron 下在 userData/data） */
 const DATA_DIR = dirname(process.env.FE_DB || join(homedir(), '.furry-everpony', 'data', 'everpony.db'));
@@ -63,18 +52,17 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.20.0.10.43';
+const VERSION = '2026.11.21.0.10.44';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
 
-/* 邮箱只做形状校验，不校验 MX（自托管不联网也能注册） */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/* 只校验 SMTP 邮箱格式，不查询 MX（自托管不联网也能注册）。 */
 const emailSchema = z
   .string()
   .trim()
   .max(120, '邮箱太长了')
-  .refine((v) => EMAIL_RE.test(v), '邮箱格式不对')
+  .refine(isMailAddress, '邮箱格式不对')
   .transform((v) => v.toLowerCase());
 
 /* Bot 标签：最多 5 个、每个 12 字内，去重 */
@@ -83,7 +71,7 @@ const tagsSchema = z
   .max(5, '最多 5 个标签')
   .transform((arr) => [...new Set(arr.map((t) => t.trim()).filter(Boolean))]);
 
-export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {}) {
+export function buildServer({ db = openDb(), uploadDir, webDir = WEB_DIR, log: injectedLog } = {}) {
   const app = Fastify({ logger: false, bodyLimit: 30 * 1024 * 1024, trustProxy: true });
   app.decorate('db', db);
   /* 中心服务器模式：客户端可能是桌面窗口（file://）、局域网页面或远程域名，
@@ -427,16 +415,46 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     return ['none', 'invite', 'email', 'both'].includes(g) ? g : 'email';
   };
 
-  const smtpConfig = () => ({
-    host: getSetting('smtpHost', '').trim(),
-    port: Number(getSetting('smtpPort', '587')) || 587,
-    secure: getSetting('smtpSecure', '0') === '1',
-    user: getSetting('smtpUser', '').trim(),
-    pass: getSetting('smtpPass', ''),
-    from: getSetting('smtpFrom', '').trim(),
-    fromName: getSetting('smtpFromName', 'Everony').trim() || 'Everony',
-  });
-  const smtpReady = () => Boolean(smtpConfig().host);
+  const smtpConfig = () => readMailConfig(getSetting);
+  const registerBootstrap = () => !db.prepare('SELECT 1 FROM accounts LIMIT 1').get();
+  const EMAIL_CODE_TTL = 10 * 60 * 1000;
+  const EMAIL_CODE_COOLDOWN = 60 * 1000;
+  const SMTP_UNAVAILABLE = '本站还不能发送邮箱验证码，请联系站点管理员完成发信设置。';
+  const emailCodeIpHits = new Map();
+  const emailCodeAddrHits = new Map();
+  const emailCodeInFlight = new Set();
+  let lastEmailSweep = 0;
+
+  function emailGateProblem(mode, gate, bootstrap) {
+    if (!bootstrap && mode === 'closed') return { code: 'REGISTRATION_CLOSED', error: '本站已关闭注册' };
+    if (bootstrap || (gate !== 'email' && gate !== 'both')) {
+      return { code: 'EMAIL_GATE_DISABLED', error: '当前注册方式不需要邮箱验证码' };
+    }
+    return null;
+  }
+
+  function emailRateLimit(ip, email) {
+    const now = Date.now();
+    if (now - lastEmailSweep >= EMAIL_CODE_TTL) {
+      sweepMap(emailCodeIpHits, EMAIL_CODE_TTL);
+      sweepMap(emailCodeAddrHits, EMAIL_CODE_TTL);
+      lastEmailSweep = now;
+    }
+    const inWindow = (map, key) => (map.get(key) || []).filter((at) => now - at < EMAIL_CODE_TTL);
+    const ipHits = inWindow(emailCodeIpHits, ip);
+    const addrHits = inWindow(emailCodeAddrHits, email);
+    const lastSent = db.prepare("SELECT created_at FROM email_codes WHERE email = ? AND purpose = 'register' ORDER BY id DESC LIMIT 1").get(email);
+    const wait = Math.max(
+      ipHits.length >= 5 ? ipHits[0] + EMAIL_CODE_TTL - now : 0,
+      addrHits.length >= 3 ? addrHits[0] + EMAIL_CODE_TTL - now : 0,
+      lastSent ? Number(lastSent.created_at) + EMAIL_CODE_COOLDOWN - now : 0,
+      emailCodeInFlight.has(email) ? 3 * 1000 : 0,
+    );
+    if (wait > 0) return Math.ceil(wait / 1000);
+    emailCodeIpHits.set(ip, [...ipHits, now]);
+    emailCodeAddrHits.set(email, [...addrHits, now]);
+    return 0;
+  }
 
   /* 数据保留天数：默认 14 天，1–365 可调，0 = 永久保留 */
   const retentionDays = () => {
@@ -470,7 +488,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
     return null;
   }
   function consumeEmailCode(email, code) {
-    const row = db.prepare('SELECT * FROM email_codes WHERE email = ? ORDER BY id DESC LIMIT 1').get(email);
+    const row = db.prepare("SELECT * FROM email_codes WHERE email = ? AND purpose = 'register' ORDER BY id DESC LIMIT 1").get(email);
     if (!row) return '请先点「发送验证码」';
     if (Number(row.expires_at) < Date.now()) return '验证码过期了，重新发一次';
     if (Number(row.tries) >= 5) return '验证码错太多次了，重新发一次';
@@ -478,7 +496,7 @@ export function buildServer({ db = openDb(), uploadDir, log: injectedLog } = {})
       db.prepare('UPDATE email_codes SET tries = tries + 1 WHERE id = ?').run(row.id);
       return '验证码不对';
     }
-    db.prepare('DELETE FROM email_codes WHERE email = ?').run(email);
+    db.prepare("DELETE FROM email_codes WHERE email = ? AND purpose = 'register'").run(email);
     return null;
   }
 
@@ -1123,8 +1141,6 @@ const registerHits = new Map();
 const globalHits = new Map();
 const loginFailHits = new Map();
 const loginAccountFail = new Map();
-const emailCodeIpHits = new Map();
-const emailCodeAddrHits = new Map();
 
 const sweepMap = (map, ttl) => {
   const now = Date.now();
@@ -1201,7 +1217,7 @@ app.get('/api/captcha', async (req, reply) => {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
     const { email, number, password, nickname, captchaId, captcha, invite, emailCode } = parsed.data;
 
-    /* 同一 IP 10 分钟最多 5 次注册，挡住脚本批量刷号 */
+    /* 同一 IP 10 分钟最多 20 次注册，挡住脚本批量刷号 */
     if (!hitAllowed(registerHits, req.ip || 'local', 20, 10 * 60 * 1000)) {
       return reply.code(429).send({ error: '注册太频繁了，10 分钟后再试' });
     }
@@ -1231,59 +1247,58 @@ app.get('/api/captcha', async (req, reply) => {
 
     /* 站点注册模式：closed 关站；其余注册即通过（不再有「等站长审核」这一步）。
        空库第一人不走这套 —— 新部署必须有人能进去当站长。 */
-    const isEmptySite = !db.prepare('SELECT 1 FROM accounts LIMIT 1').get();
-    if (!isEmptySite && registerMode() === 'closed') {
-      return reply.code(403).send({ error: '本站已关闭注册' });
-    }
+    const result = db.transaction(() => {
+      const isEmptySite = registerBootstrap();
+      if (!isEmptySite && registerMode() === 'closed') {
+        return { status: 403, code: 'REGISTRATION_CLOSED', error: '本站已关闭注册' };
+      }
 
-    /* 注册门禁：邮箱验证码 / 邀请码，至少要过一道（站长可在管理台关掉） */
-    if (!isEmptySite) {
-      const gate = registerGate();
+      /* 已送达的验证码不依赖此刻 SMTP 是否可用。消费验证码和创建账号放在同一事务。 */
+      const gate = isEmptySite ? 'none' : registerGate();
       if (gate !== 'none') {
         const wantEmail = gate === 'email' || gate === 'both';
         const wantInvite = gate === 'invite' || gate === 'both';
         let passed = false;
-        let emailErr = '';
+        let emailErr;
+        let inviteErr;
         if (wantEmail && emailCode) {
-          if (!smtpReady()) emailErr = '本站没配发信服务，请用邀请码注册';
-          else {
-            const err = consumeEmailCode(email, emailCode);
-            if (!err) passed = true;
-            else emailErr = err;
-          }
+          emailErr = consumeEmailCode(email, emailCode);
+          passed = !emailErr;
         }
-        let inviteErr = '';
         if (!passed && wantInvite && invite) {
-          const err = consumeInvite(invite);
-          if (!err) passed = true;
-          else inviteErr = err;
+          inviteErr = consumeInvite(invite);
+          passed = !inviteErr;
         }
         if (!passed) {
-          if (gate === 'email') return reply.code(400).send({ error: emailErr || '请输入邮箱验证码' });
-          if (gate === 'invite') return reply.code(400).send({ error: inviteErr || '请输入邀请码' });
-          return reply.code(400).send({
-            error: inviteErr || emailErr || (smtpReady() ? '请填邮箱验证码或邀请码' : '请输入邀请码'),
-          });
+          if (inviteErr) return { status: 400, code: 'INVITE_INVALID', error: inviteErr };
+          if (emailErr) return { status: 400, code: 'EMAIL_CODE_INVALID', error: emailErr };
+          if (gate === 'email' && !describeMailConfig(smtpConfig()).ready) {
+            return { status: 503, code: 'SMTP_UNAVAILABLE', error: SMTP_UNAVAILABLE };
+          }
+          if (gate === 'email') return { status: 400, code: 'EMAIL_CODE_REQUIRED', error: '请输入邮箱验证码' };
+          if (gate === 'invite') return { status: 400, code: 'INVITE_REQUIRED', error: '请输入邀请码' };
+          return { status: 400, code: 'REGISTRATION_VERIFICATION_REQUIRED', error: '请填邮箱验证码或邀请码' };
         }
       }
-    }
 
-    const info = db
-      .prepare(
+      const info = db.prepare(
         `INSERT INTO accounts (number, type, nickname, password_hash, created_at, email, tags, approved)
          VALUES (?, 'user', ?, ?, ?, ?, '[]', 1)`,
-      )
-      .run(number, nickname, hashPassword(password), Date.now(), email);
-
-    const accountId = Number(info.lastInsertRowid);
-    /* 空库第一个注册的人就是站长：不然新部署永远进不了管理台 */
-    const hasAdmin = db.prepare('SELECT 1 FROM accounts WHERE is_admin = 1 LIMIT 1').get();
-    const becomesAdmin = !hasAdmin;
-    if (becomesAdmin) db.prepare('UPDATE accounts SET is_admin = 1 WHERE id = ?').run(accountId);
-    return {
-      token: issueSession(accountId, req),
-      account: { id: accountId, number, nickname, type: 'user', bio: '', avatar: '', email, tags: [], is_admin: becomesAdmin },
-    };
+      ).run(number, nickname, hashPassword(password), Date.now(), email);
+      const accountId = Number(info.lastInsertRowid);
+      /* 空库第一个注册的人就是站长：不然新部署永远进不了管理台。 */
+      const becomesAdmin = !db.prepare('SELECT 1 FROM accounts WHERE is_admin = 1 LIMIT 1').get();
+      if (becomesAdmin) db.prepare('UPDATE accounts SET is_admin = 1 WHERE id = ?').run(accountId);
+      return {
+        token: issueSession(accountId, req),
+        account: { id: accountId, number, nickname, type: 'user', bio: '', avatar: '', email, tags: [], is_admin: becomesAdmin },
+      };
+    })();
+    if (result.error) {
+      const { status, ...body } = result;
+      return reply.code(status).send(body);
+    }
+    return result;
   });
 
   /* ---------- 登录 ---------- */
@@ -1512,70 +1527,95 @@ app.get('/api/captcha', async (req, reply) => {
     };
   });
 
-  /* ---------- 站点公开信息（登录页要知道要不要邀请码） ---------- */
-  app.get('/api/site', async () => ({
-    version: VERSION,
-    siteName: getSetting('siteName', 'Everony'),
-    registerMode: registerMode(),
-    registerGate: registerGate(),
-    smtpReady: smtpReady(),
-    retentionDays: retentionDays(),
-    donationLink: getSetting('donationLink', ''),
-    donationImage: getSetting('donationImage', ''),
+  /* ---------- 站点公开信息：不含 SMTP 主机、账号或密码 ---------- */
+  app.get('/api/site', async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const mode = registerMode();
+    const gate = registerGate();
+    const bootstrap = registerBootstrap();
+    const smtpReady = describeMailConfig(smtpConfig()).ready;
+    const noEmail = emailGateProblem(mode, gate, bootstrap);
+    return {
+      version: VERSION,
+      siteName: getSetting('siteName', 'Everony'),
+      registerMode: mode,
+      registerGate: gate,
+      registerBootstrap: bootstrap,
+      smtpReady,
+      emailCodeAvailable: !noEmail && smtpReady,
+      emailCodeUnavailableReason: noEmail?.error ?? (smtpReady ? null : SMTP_UNAVAILABLE),
+      retentionDays: retentionDays(),
+      donationLink: getSetting('donationLink', ''),
+      donationImage: getSetting('donationImage', ''),
       donationImages: donationImages(),
-  }));
+    };
+  });
 
   /* ---------- 邮箱验证码（注册前先发码） ---------- */
   app.post('/api/email-code', async (req, reply) => {
     const parsed = z.object({ email: emailSchema }).safeParse(req.body || {});
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
-    const email = parsed.data.email;
-    const meta = requestMeta(req);
-    if (!smtpReady()) return reply.code(400).send({ error: '本站没配发信服务，请用邀请码注册' });
-    if (!hitAllowed(emailCodeIpHits, meta.ip, 5, 10 * 60 * 1000) || !hitAllowed(emailCodeAddrHits, email, 3, 10 * 60 * 1000)) {
-      return reply.code(429).send({ error: '发太频繁了，10 分钟后再试' });
-    }
-    if (db.prepare('SELECT 1 FROM accounts WHERE email = ?').get(email)) {
-      return reply.code(409).send({ error: '这个邮箱已经注册过了，直接登录吧' });
-    }
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    const now = Date.now();
-    const tx = db.transaction(() => {
-      db.prepare('DELETE FROM email_codes WHERE email = ?').run(email);
-      db.prepare(
-        'INSERT INTO email_codes (email, code, purpose, tries, expires_at, created_at) VALUES (?, ?, ?, 0, ?, ?)',
-      ).run(email, code, 'register', now + 10 * 60 * 1000, now);
-    });
-    tx();
-    try {
-      await sendMail(smtpConfig(), {
-        to: email,
-        subject: 'Everony 注册验证码',
-        text: '你的验证码是 ' + code + '，10 分钟内有效。\n如果不是你本人在注册，忽略这封邮件就行。',
+    if (!parsed.success) return reply.code(400).send({ code: 'EMAIL_INVALID', error: parsed.error.issues[0].message });
+    const noEmail = emailGateProblem(registerMode(), registerGate(), registerBootstrap());
+    if (noEmail) return reply.code(403).send(noEmail);
+    const cfg = smtpConfig();
+    if (!describeMailConfig(cfg).ready) return reply.code(503).send({ code: 'SMTP_UNAVAILABLE', error: SMTP_UNAVAILABLE });
+
+    const { email } = parsed.data;
+    const retryAfter = emailRateLimit(clientIp(req), email);
+    if (retryAfter > 0) {
+      return reply.header('Retry-After', String(retryAfter)).code(429).send({
+        code: 'EMAIL_RATE_LIMITED', error: '发送太频繁了，请在 ' + retryAfter + ' 秒后重试。', retryAfter,
       });
-    } catch (err) {
-      db.prepare('DELETE FROM email_codes WHERE email = ?').run(email);
-      return reply.code(502).send({ error: '邮件没发出去：' + (err && err.message ? err.message : '发信配置有问题') });
     }
-    return { ok: true, expiresIn: 600 };
+    const addressTaken = () => db.prepare('SELECT 1 FROM accounts WHERE email = ?').get(email);
+    const alreadyRegistered = { code: 'EMAIL_ALREADY_REGISTERED', error: '这个邮箱已经注册过了，直接登录吧' };
+    if (addressTaken()) return reply.code(409).send(alreadyRegistered);
+
+    const code = String(randomInt(100000, 1000000));
+    emailCodeInFlight.add(email);
+    try {
+      try {
+        await sendMail(cfg, {
+          to: email,
+          subject: 'Everony 注册验证码',
+          text: '你的验证码是 ' + code + '，10 分钟内有效。\n如果不是你本人在注册，忽略这封邮件就行。',
+        });
+      } catch (err) {
+        const { code: classification, smtpStatus } = mailFailure(err);
+        log.warn('[smtp] 注册验证码未投递', classification, smtpStatus || '');
+        return reply.code(502).send({ code: 'SMTP_DELIVERY_FAILED', error: '验证码邮件没能送出，请稍后重试；若持续失败，请联系站点管理员。' });
+      }
+      /* 发新码失败不影响上一封；只保存已被供应商接受的新码。 */
+      if (addressTaken()) return reply.code(409).send(alreadyRegistered);
+      db.transaction(() => {
+        const now = Date.now();
+        db.prepare("DELETE FROM email_codes WHERE email = ? AND purpose = 'register'").run(email);
+        db.prepare(
+          'INSERT INTO email_codes (email, code, purpose, tries, expires_at, created_at) VALUES (?, ?, ?, 0, ?, ?)',
+        ).run(email, code, 'register', now + EMAIL_CODE_TTL, now);
+      })();
+      return { ok: true, expiresIn: EMAIL_CODE_TTL / 1000, cooldownSeconds: EMAIL_CODE_COOLDOWN / 1000 };
+    } finally {
+      emailCodeInFlight.delete(email);
+    }
   });
 
   /* ---------- 管理台：站点设置（发信 / 注册门禁 / 数据保留） ---------- */
-  app.get('/api/admin/site', async (req, reply) => {
-    const me = requireAdmin(req, reply);
-    if (!me) return;
+  function adminSiteData() {
     const cfg = smtpConfig();
+    const { ready: smtpReady, issues: smtpIssues } = describeMailConfig(cfg);
     return {
       registerMode: registerMode(),
       registerGate: registerGate(),
       retentionDays: retentionDays(),
-      smtpReady: smtpReady(),
+      smtpReady,
+      smtpIssues,
       smtp: {
         host: cfg.host,
-        port: cfg.port,
+        port: Number.isInteger(cfg.port) ? cfg.port : null,
         secure: cfg.secure,
         user: cfg.user,
-        hasPass: Boolean(cfg.pass),
+        hasPass: Boolean(cfg.pass.trim()),
         from: cfg.from,
         fromName: cfg.fromName,
       },
@@ -1583,6 +1623,11 @@ app.get('/api/captcha', async (req, reply) => {
       donationImage: getSetting('donationImage', ''),
       donationImages: donationImages(),
     };
+  }
+
+  app.get('/api/admin/site', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    return reply.header('Cache-Control', 'no-store').send(adminSiteData());
   });
 
   app.patch('/api/admin/site', async (req, reply) => {
@@ -1593,58 +1638,68 @@ app.get('/api/captcha', async (req, reply) => {
         registerMode: z.enum(['open', 'approval', 'closed']).optional(),
         registerGate: z.enum(['none', 'invite', 'email', 'both']).optional(),
         retentionDays: z.coerce.number().int().min(0).max(365).optional(),
-        smtpHost: z.string().trim().max(120).optional(),
-        smtpPort: z.coerce.number().int().min(1).max(65535).optional(),
+        smtpHost: z.string().trim().refine((v) => !v || isMailHost(v), 'SMTP 只填主机名或 IP，不要带协议或端口。').optional(),
+        smtpPort: z.coerce.number().int().min(1, 'SMTP 端口必须为 1–65535 的整数。').max(65535, 'SMTP 端口必须为 1–65535 的整数。').optional(),
         smtpSecure: z.boolean().optional(),
         smtpUser: z.string().trim().max(120).optional(),
         smtpPass: z.string().max(200).optional(),
-        smtpFrom: z.string().trim().max(120).optional(),
+        smtpClearPass: z.boolean().optional(),
+        smtpFrom: z.string().trim().refine((v) => !v || isMailAddress(v), '发件邮箱格式不对。').optional(),
         smtpFromName: z.string().trim().max(40).optional(),
         donationLink: z.string().max(500).optional(),
         donationImage: z.string().max(400000).optional(),
         donationImages: z.array(z.string().max(400000)).max(6).optional(),
       })
       .safeParse(req.body || {});
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0].message });
+    if (!parsed.success) return reply.code(400).send({ code: 'SITE_SETTINGS_INVALID', error: parsed.error.issues[0].message });
     const p = parsed.data;
-    if (p.registerMode !== undefined) setSetting('registerMode', p.registerMode);
-    if (p.registerGate !== undefined) setSetting('registerGate', p.registerGate);
-    if (p.retentionDays !== undefined) setSetting('retentionDays', String(p.retentionDays));
-    if (p.smtpHost !== undefined) setSetting('smtpHost', p.smtpHost);
-    if (p.smtpPort !== undefined) setSetting('smtpPort', String(p.smtpPort));
-    if (p.smtpSecure !== undefined) setSetting('smtpSecure', p.smtpSecure ? '1' : '0');
-    if (p.smtpUser !== undefined) setSetting('smtpUser', p.smtpUser);
-    /* 密码留空 = 不改，避免前端回显打码值把真密码覆盖掉 */
-    if (p.smtpPass !== undefined && p.smtpPass !== '') setSetting('smtpPass', p.smtpPass);
-    if (p.smtpFrom !== undefined) setSetting('smtpFrom', p.smtpFrom);
-    if (p.smtpFromName !== undefined) setSetting('smtpFromName', p.smtpFromName);
-    if (p.donationLink !== undefined) setSetting('donationLink', p.donationLink);
-    if (p.donationImage !== undefined) setSetting('donationImage', p.donationImage);
-    if (p.donationImages !== undefined) setSetting('donationImages', JSON.stringify(p.donationImages));
-    return {
-      ok: true,
-      registerGate: registerGate(),
-      retentionDays: retentionDays(),
-      smtpReady: smtpReady(),
-      donationLink: getSetting('donationLink', ''),
-      donationImage: getSetting('donationImage', ''),
-      donationImages: donationImages(),
+    const cfg = smtpConfig();
+    const newPass = p.smtpPass?.trim() ? p.smtpPass : undefined;
+    const reject = (code, error) => reply.code(400).send({ code, error });
+    if (newPass && p.smtpClearPass) return reject('SMTP_AUTHORIZATION_CONFLICT', '请在填写新授权码和清除旧授权码中选择一种。');
+    const next = {
+      host: p.smtpHost ?? cfg.host, port: p.smtpPort ?? cfg.port, secure: p.smtpSecure ?? cfg.secure,
+      user: p.smtpUser ?? cfg.user, pass: p.smtpClearPass ? '' : newPass ?? cfg.pass, from: p.smtpFrom ?? cfg.from,
     };
+    if (cfg.pass.trim() && (next.host.toLowerCase() !== cfg.host.toLowerCase() || next.user !== cfg.user) && !newPass && !p.smtpClearPass) {
+      return reject('SMTP_REAUTHORIZE_REQUIRED', '修改 SMTP 主机或登录名后，请重新填写授权码；若无需认证，请选择清除已保存的授权码。');
+    }
+    const { issues } = describeMailConfig(next);
+    const invalid = issues.find(({ code }) => (
+      (code === 'SMTP_PORT_MODE_MISMATCH' && (p.smtpPort !== undefined || p.smtpSecure !== undefined)) ||
+      (code === 'SMTP_USER_INVALID' && p.smtpUser !== undefined) ||
+      (code === 'SMTP_AUTHORIZATION_INVALID' && newPass !== undefined)
+    ));
+    if (invalid) return reject(invalid.code, invalid.message);
+
+    db.transaction(() => {
+      for (const key of ['registerMode', 'registerGate', 'retentionDays', 'smtpHost', 'smtpPort', 'smtpUser', 'smtpFrom', 'smtpFromName', 'donationLink', 'donationImage']) {
+        if (p[key] !== undefined) setSetting(key, p[key]);
+      }
+      if (p.smtpSecure !== undefined) setSetting('smtpSecure', p.smtpSecure ? '1' : '0');
+      /* 空密码保留原值；清除需要明确勾选，且不把已有密码回显给浏览器。 */
+      if (p.smtpClearPass) setSetting('smtpPass', '');
+      else if (newPass !== undefined) setSetting('smtpPass', newPass);
+      if (p.donationImages !== undefined) setSetting('donationImages', JSON.stringify(p.donationImages));
+    })();
+    return reply.header('Cache-Control', 'no-store').send({ ok: true, ...adminSiteData() });
   });
 
   app.post('/api/admin/site/test-mail', async (req, reply) => {
-    const me = requireAdmin(req, reply);
-    if (!me) return;
-    const parsed = z.object({ to: emailSchema.optional() }).safeParse(req.body || {});
-    if (!parsed.success) return reply.code(400).send({ error: '收件邮箱格式不对' });
-    const to = parsed.data.to || me.email || '';
-    if (!to) return reply.code(400).send({ error: '填个收件邮箱' });
+    if (!requireAdmin(req, reply)) return;
+    const parsed = z.object({ to: emailSchema }).safeParse(req.body || {});
+    if (!parsed.success) return reply.code(400).send({ code: 'EMAIL_INVALID', error: '请明确填写有效的测试收件邮箱。' });
+    const cfg = smtpConfig();
+    const { ready, issues } = describeMailConfig(cfg);
+    if (!ready) return reply.code(503).send({ code: issues[0].code, error: issues[0].message });
     try {
-      await sendMail(smtpConfig(), { to, subject: 'Everony 发信测试', text: '收到这封就说明发信配置没问题。' });
+      await sendMail(cfg, { to: parsed.data.to, subject: 'Everony 发信测试', text: '这封邮件用于验证站点的 SMTP 发信设置。' });
     } catch (err) {
-      return reply.code(502).send({ error: '没发出去：' + (err && err.message ? err.message : '未知错误') });
+      const failure = mailFailure(err);
+      log.warn('[smtp] 管理台试发未投递', failure.code, failure.smtpStatus || '');
+      return reply.code(502).send(failure);
     }
-    return { ok: true, to };
+    return { ok: true };
   });
 
   /* ---------- 管理台：邀请码 ---------- */
@@ -4448,7 +4503,7 @@ app.get('/api/captcha', async (req, reply) => {
       lanUrls,
       lanNames,
       tunnel,
-      webReady: existsSync(WEB_DIR),
+      webReady: existsSync(join(webDir, 'index.html')),
       donationLink: getSetting('donationLink', ''),
       donationImage: getSetting('donationImage', ''),
       donationImages: donationImages(),
@@ -4500,20 +4555,8 @@ app.get('/api/captcha', async (req, reply) => {
       .send(createReadStream(file));
   });
 
-  /* ---------- 静态前端（打包后由服务端直接托管，桌面端就能用 http://127.0.0.1 打开） ---------- */
-  if (existsSync(WEB_DIR)) {
-    app.get('/*', async (req, reply) => {
-      const url = req.raw.url.split('?')[0];
-      if (url.startsWith('/api/') || url.startsWith('/onebot/')) {
-        return reply.code(404).send({ error: '没有这个接口' });
-      }
-      const rel = normalize(decodeURIComponent(url)).replace(/^([/\\])+/, '');
-      let file = join(WEB_DIR, rel);
-      if (!file.startsWith(WEB_DIR)) return reply.code(403).send({ error: '不许出去' });
-      if (!existsSync(file) || statSync(file).isDirectory()) file = join(WEB_DIR, 'index.html');
-      return reply.type(MIME[extname(file).toLowerCase()] || 'application/octet-stream').send(createReadStream(file));
-    });
-  }
+  /* ---------- 按指纹缓存并协商构建期压缩的前端资源 ---------- */
+  if (existsSync(webDir)) registerWebStatic(app, webDir);
 
   /* ---------- 定时清理：注销到期 + 数据保留期 ---------- */
   function sweepOnce() {

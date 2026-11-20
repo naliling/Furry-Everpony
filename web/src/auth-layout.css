@@ -1,0 +1,210 @@
+/* Auth 独占滚动容器；内部网格只在放得下时垂直居中。 */
+.auth-wrap.auth-screen {
+  position: absolute;
+  inset: var(--auth-visible-top, 0px) 0 auto;
+  display: block;
+  block-size: var(--auth-visible-height, 100%);
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* 正常滚动和本地边缘回弹交给系统，不把手势传给浏览器导航。 */
+  overscroll-behavior-y: contain;
+  scroll-padding-block: 12px;
+  -webkit-overflow-scrolling: touch;
+  animation: none;
+}
+
+@supports (height: 100dvh) {
+  .auth-wrap.auth-screen { block-size: var(--auth-visible-height, 100dvh); }
+}
+
+.auth-screen .auth-scroll-layout {
+  --auth-gutter: clamp(12px, 3vw, 34px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 0.98fr);
+  align-items: center;
+  gap: clamp(18px, 3vw, 32px);
+  min-block-size: 100%;
+  min-inline-size: 0;
+  padding-top: calc(var(--auth-gutter) + env(safe-area-inset-top, 0px) + var(--auth-title-inset, 0px));
+  padding-right: calc(var(--auth-gutter) + env(safe-area-inset-right, 0px));
+  padding-bottom: calc(var(--auth-gutter) + env(safe-area-inset-bottom, 0px));
+  padding-left: calc(var(--auth-gutter) + env(safe-area-inset-left, 0px));
+}
+
+:root[data-desktop='1'] .auth-screen .auth-scroll-layout { --auth-title-inset: 34px; }
+.auth-screen .auth-main { min-inline-size: 0; }
+.auth-screen .auth-card {
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.auth-screen .auth-card-top {
+  display: flex;
+  gap: 6px 14px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-block-end: 10px;
+}
+
+.auth-screen .auth-card-top .auth-card-eyebrow {
+  display: inline-flex;
+  margin: 0;
+  font-size: 0.87rem;
+  letter-spacing: .06em;
+}
+
+.auth-screen .auth-card-eyebrow::before { display: none; }
+.auth-screen .auth-card-eyebrow img { object-fit: contain; }
+.auth-screen .auth-card-top .auth-back-inline {
+  min-block-size: 40px;
+  min-inline-size: 0;
+  margin: 0;
+  padding-inline: 10px;
+}
+
+.auth-screen .auth-card-sub { margin-block-end: 0; }
+.auth-screen .auth-tabs button,
+.auth-screen .auth-tab-glider { height: 44px; }
+.auth-screen .auth-tab-glider {
+  inset-inline-start: 3px;
+  inline-size: calc(50% - 3px);
+  pointer-events: none;
+  transition: transform 540ms cubic-bezier(.22, .61, .36, 1);
+}
+.auth-screen .auth-tab-glider[data-mode='register'] { transform: translateX(100%); }
+
+.auth-screen .auth-mode-form {
+  min-inline-size: 0;
+  animation: auth-panel-in 560ms cubic-bezier(.22, .61, .36, 1) both;
+}
+
+@keyframes auth-panel-in {
+  from { opacity: .7; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.auth-screen .auth-mode-form .field {
+  min-inline-size: 0;
+  margin-block-end: 12px;
+}
+
+.auth-screen .auth-field-hint {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.auth-screen .auth-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.auth-screen .auth-code-row .captcha-img {
+  inline-size: clamp(88px, 27vw, 132px);
+  block-size: 100%;
+  min-block-size: 44px;
+  min-inline-size: 0;
+  color: #f2f5ff;
+}
+
+.auth-screen .auth-code-row .captcha-img img {
+  max-inline-size: 100%;
+  object-fit: contain;
+}
+
+.auth-screen .auth-captcha-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 4px;
+  font-size: 0.78rem;
+}
+
+.auth-screen .auth-email-action {
+  min-block-size: 44px;
+  padding-inline: 9px;
+  white-space: nowrap;
+}
+
+.auth-screen .auth-field-error,
+.auth-screen .auth-gate-note {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.auth-screen .auth-gate-note { color: var(--text-2); }
+.auth-screen .auth-mode-form > .auth-gate-note { margin: 0 0 10px; }
+.auth-screen .auth-field-error { color: var(--danger); }
+.auth-screen .auth-mail-sent { margin: 0; overflow-wrap: anywhere; }
+.auth-screen .auth-resource-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block-end: 10px;
+}
+
+.auth-screen .form-error,
+.auth-screen .form-ok { overflow-wrap: anywhere; }
+.auth-screen .form-ok { color: var(--success); }
+.auth-screen .auth-submit { min-block-size: 46px; }
+.auth-screen .saved-text strong,
+.auth-screen .saved-text em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-screen .auth-card button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.auth-screen .auth-card :is(.auth-back-inline, .captcha-img, .auth-email-action, .auth-submit) {
+  transition: transform 160ms var(--ease), opacity 160ms var(--ease), background-color 180ms var(--ease), border-color 180ms var(--ease);
+}
+.auth-screen .auth-card button:not(:disabled):active { transform: scale(.98); }
+
+@media (max-width: 1080px) {
+  .auth-screen .auth-scroll-layout {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    align-items: start;
+  }
+  .auth-screen .auth-hero { display: none; }
+  .auth-screen .auth-main { justify-self: center; }
+}
+
+@media (max-width: 779px) {
+  .auth-screen .auth-scroll-layout { --auth-gutter: 12px; }
+  .auth-screen .auth-card { padding: clamp(12px, 4vw, 18px); }
+}
+
+@media (max-width: 779px), (pointer: coarse) {
+  /* iOS 的 16px 阈值能避免输入聚焦时突然放大整个页面。 */
+  .auth-screen .input-wrap { min-block-size: 44px; }
+  .auth-screen .auth-form .input { font-size: max(16px, 0.92rem); }
+  .auth-screen .auth-card-top .auth-back-inline { min-block-size: 44px; }
+}
+
+@media (max-width: 359px) {
+  .auth-screen .auth-code-row { grid-template-columns: minmax(0, 1fr); }
+  .auth-screen .auth-code-row .captcha-img { block-size: 44px; }
+  .auth-screen .auth-email-action { justify-self: start; }
+}
+
+@media (max-height: 540px) and (orientation: landscape) {
+  .auth-screen .auth-scroll-layout { --auth-gutter: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-screen .auth-mode-form,
+  .auth-screen .auth-logo-img,
+  .auth-screen .auth-logo-halo { animation: none !important; }
+  .auth-screen .auth-card *, .auth-screen .auth-card { transition: none !important; }
+  .auth-screen .auth-card button:not(:disabled):active { transform: none; }
+}

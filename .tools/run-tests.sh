@@ -19,6 +19,6 @@ run_one() {
 run_one p1 test-p1.db test-p1.mjs
 run_one admin test-admin.db test-admin.mjs
 run_one captcha test-captcha.db test-captcha.mjs
-run_one guard test-guard.db test-guard.mjs skip
+run_one guard test-guard.db test-guard.mjs approval
 powershell -NoProfile -ExecutionPolicy Bypass -File .tools/kill-7799.ps1 > /dev/null 2>&1
 echo "ALL DONE"

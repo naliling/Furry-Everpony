@@ -10,15 +10,11 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const stageRef = useRef(null);
   const gesture = useRef(null);
-  const session = useRef(0);
-  const { closing, beginClose } = useOverlayClose(onClose);
-  useOverlay(beginClose);
-
+  const { closing, beginClose, layerRef } = useOverlayClose(onClose);
   const item = items[index] || null;
-  const current = session.current;
+  useOverlay(beginClose, Boolean(item));
 
   const reset = () => {
-    session.current += 1;
     setScale(0.85);
     setOffset({ x: 0, y: 0 });
   };
@@ -60,6 +56,7 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
 
   useEffect(() => {
     const onKey = (e) => {
+      if (closing || e.defaultPrevented) return;
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
         changeIndex(index - 1);
@@ -126,7 +123,7 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
   if (!item) return null;
 
   return createPortal(
-    <div className={('imgviewer' + (closing ? ' is-closing' : ''))} role="dialog" aria-modal="true" aria-label="图片查看器">
+    <div ref={layerRef} className={'imgviewer motion-layer' + (closing ? ' is-closing' : '')} role="dialog" aria-modal="true" aria-label="图片查看器" inert={closing}>
       <div className="imgviewer-top">
         <span className="imgviewer-count">
           {index + 1} / {items.length}
@@ -172,7 +169,7 @@ export default function ImageViewer({ items = [], index = 0, onIndex, onClose })
           draggable={false}
           style={{
             transform: 'translate(' + offset.x + 'px,' + offset.y + 'px) scale(' + scale + ')',
-            transition: gesture.current ? 'none' : 'transform 160ms cubic-bezier(.2,.8,.2,1)',
+            transition: gesture.current ? 'none' : undefined,
             cursor: scale > 1 ? 'grab' : 'zoom-in',
           }}
         />

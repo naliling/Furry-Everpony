@@ -110,7 +110,7 @@
   background: linear-gradient(135deg, rgba(91, 140, 255, 0.34), rgba(167, 123, 255, 0.26));
   box-shadow: inset 0 0 0 1px rgba(120, 150, 255, 0.38), 0 10px 24px -12px rgba(91, 140, 255, 0.9);
 }
-.rail-btn.on::before {
+.rail-btn::before {
   content: '';
   position: absolute;
   left: -10px;
@@ -119,9 +119,13 @@
   height: 20px;
   border-radius: 0 3px 3px 0;
   background: var(--grad-brand);
-  transform: translateY(-50%);
+  transform: translateY(-50%) scaleY(.52);
   box-shadow: 0 0 10px rgba(91, 140, 255, 0.9);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
+.rail-btn.on::before { opacity: 1; transform: translateY(-50%) scaleY(1); }
 .rail-btn.on .rail-icon {
   filter: drop-shadow(0 0 6px rgba(91, 140, 255, 0.7));
 }
@@ -393,8 +397,9 @@
   color: var(--text-3);
   font-size: 0.76rem;
   font-weight: 600;
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
+.conv-filter button:active { transform: scale(.97); }
 .conv-filter button:hover {
   color: var(--text-1);
 }
@@ -425,15 +430,8 @@
   border: 1px solid transparent;
   text-align: left;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
-  animation: fe-list-in 260ms var(--ease) both;
-  animation-delay: calc(var(--i, 0) * 14ms);
 }
-@keyframes fe-list-in {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-}
+.conv-item:active { transform: scale(.99); }
 .conv-item:hover {
   background: var(--bg-hover);
 }
@@ -609,8 +607,8 @@
   }
 }
 
-/* ---------- 手机：单页栈 ---------- */
-@media (max-width: 779px) {
+/* ---------- 手机：单页栈（与 useIsMobile 保持同一断点） ---------- */
+@media (max-width: 759px) {
   .app-shell {
     flex-direction: column;
     padding-top: env(safe-area-inset-top, 0px);
@@ -648,8 +646,9 @@
     gap: 2px;
     color: var(--text-3);
     border-radius: var(--radius-sm);
-    transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+    transition: color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur) var(--ease);
   }
+  .mobile-tab:active { transform: scale(.96); }
   .mobile-tab.on {
     color: var(--brand);
   }
@@ -665,7 +664,7 @@
   .mobile-tab.on .mobile-tab-icon {
     background: var(--brand-soft);
   }
-  .mobile-tab.on .mobile-tab-icon::after {
+  .mobile-tab-icon::after {
     content: '';
     position: absolute;
     bottom: -1px;
@@ -674,7 +673,12 @@
     border-radius: 50%;
     background: var(--grad-brand);
     box-shadow: 0 0 6px var(--brand);
+    pointer-events: none;
+    opacity: 0;
+    transform: scale(.6);
+    transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
   }
+  .mobile-tab.on .mobile-tab-icon::after { opacity: 1; transform: none; }
   .mobile-tab-label {
     font-size: 0.62rem;
     font-weight: 600;
@@ -759,26 +763,25 @@
     height: 100%;
     border-right: none;
   }
-  .conv-hidden-mobile {
-    display: none !important;
-  }
-  .chat-column {
+  .conv-hidden-mobile { visibility: hidden; }
+  .chat-tab > .chat-column {
     position: absolute;
     inset: 0;
     width: 100%;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity var(--motion-page) var(--motion-ease);
   }
-  .chat-hidden-mobile {
-    display: none !important;
+  .chat-column:is(.chat-visible-mobile, .chat-leaving-mobile) { visibility: visible; }
+  .chat-column.chat-visible-mobile { opacity: 1; pointer-events: auto; }
+  @media (prefers-reduced-motion: no-preference) {
+    .chat-column.chat-visible-mobile { transform: var(--chat-swipe-transform, none); }
   }
-  .chat-column {
-    animation: fe-slide-in 240ms var(--ease);
+  @media (prefers-reduced-motion: reduce) {
+    .chat-tab > .chat-column { transition: none; }
   }
-  @keyframes fe-slide-in {
-    from {
-      opacity: 0;
-      transform: translateX(14%);
-    }
-  }
+
   .conv-head {
     padding: 14px 14px 10px;
   }

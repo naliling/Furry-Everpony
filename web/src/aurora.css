@@ -28,33 +28,25 @@
   --ease-aurora: cubic-bezier(.22,.61,.36,1);
 }
 
-/* 全屏壁纸层：三张极光图极慢交叉淡入（只动 opacity，走 GPU） */
+/* 静态壁纸：只匹配当前主题的图片，省流模式不引用任何 URL。 */
 .aurora-wallpaper {
   position: fixed;
   inset: 0;
   z-index: -2;
   pointer-events: none;
   background-color: var(--bg-deep);
-}
-.aurora-wallpaper .wp-layer {
-  position: absolute;
-  inset: 0;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  opacity: 0;
-  animation: wp-cycle 36s ease-in-out infinite;
-  will-change: opacity;
 }
-.aurora-wallpaper .wp-1 { background-image: url('/assets/aurora-1.webp'); animation-delay: 0s; }
-.aurora-wallpaper .wp-2 { background-image: url('/assets/aurora-2.webp'); animation-delay: 12s; }
-.aurora-wallpaper .wp-3 { background-image: url('/assets/aurora-3.webp'); animation-delay: 24s; }
-@keyframes wp-cycle {
-  0%   { opacity: 0; transform: scale(1.02); }
-  8%   { opacity: 1; }
-  33%  { opacity: 1; }
-  42%  { opacity: 0; transform: scale(1.06); }
-  100% { opacity: 0; transform: scale(1.02); }
+:root:not([data-lite='1']):is(:not([data-theme]), [data-theme='deep']) .aurora-wallpaper {
+  background-image: url('/assets/aurora-1.webp');
+}
+:root:not([data-lite='1'])[data-theme='violet'] .aurora-wallpaper {
+  background-image: url('/assets/aurora-2.webp');
+}
+:root:not([data-lite='1'])[data-theme='light'] .aurora-wallpaper {
+  background-image: url('/assets/aurora-3.webp');
 }
 /* 暗化 + 极光光斑：压住图片杂乱，给玻璃留出可透的氛围底 */
 .aurora-wallpaper::after {
@@ -68,7 +60,6 @@
     rgba(5, 6, 12, 0.42);
 }
 /* 省流/低端设备：不加载壁纸，退回纯 CSS 极光 */
-:root[data-lite='1'] .aurora-wallpaper .wp-layer { display: none; }
 :root[data-lite='1'] .aurora-wallpaper {
   background: radial-gradient(70% 60% at 15% 5%, rgba(255,122,168,.2), transparent 70%),
               radial-gradient(65% 55% at 85% 15%, rgba(111,191,159,.18), transparent 70%),
@@ -95,39 +86,17 @@
   transform: translate3d(0, 0, 0);
 }
 
-/* 尊重系统减弱动画设置 */
+/* 位移降级与全局动画偏好分别处理，避免重复覆盖。 */
 @media (prefers-reduced-motion: reduce) {
-  .aurora-wallpaper .wp-layer { animation: none; opacity: 1; }
-  .aurora-wallpaper .wp-2, .aurora-wallpaper .wp-3 { display: none; }
   .fe-reveal { opacity: 1; transform: none; transition: none; }
-  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
-/* ============================================================
-   v0.10.35 视觉修正：动画放慢 / 玻璃均匀 / 壁纸静态 / 浅透明
-   ============================================================ */
-
-/* 1) 动画时长：切页/弹窗/浮层 0.5–0.8 秒 */
+/* 玻璃边缘均匀：填充与描边同一档 alpha */
 :root {
-  --dur: 560ms;
-  --dur-slow: 720ms;
   --glass-alpha: 0.085;
   --glass-alpha-strong: 0.12;
   --glass-border-alpha: 0.16;
 }
-.overlay, .ctx-layer { animation-duration: 640ms !important; }
-.modal, .drawer, .ctx-menu, .ctx-sheet { animation-duration: 680ms !important; }
-@keyframes fe-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes fe-pop { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
-.app-main > *, .auth-wrap, .plaza-page {
-  animation: fe-page-in 700ms cubic-bezier(.22,.61,.36,1) both;
-}
-@keyframes fe-page-in {
-  from { opacity: 0; transform: translate3d(0, 12px, 0); }
-  to { opacity: 1; transform: none; }
-}
-
-/* 2) 玻璃边缘均匀：填充与描边同一档 alpha */
 .glass, .auth-card.glass, .auth-hero, .settings-card, .bot-card, .conv-item, .group-card {
   background: rgba(255, 255, 255, var(--glass-alpha)) !important;
   border-color: rgba(255, 255, 255, var(--glass-border-alpha)) !important;
@@ -139,14 +108,9 @@
 }
 .glass::before { background: linear-gradient(180deg, rgba(255,255,255,.07), transparent 45%) !important; }
 
-/* 3) 壁纸静态：不轮播；按主题固定一张 */
-.aurora-wallpaper .wp-layer { animation: none !important; opacity: 0 !important; transform: none !important; }
-:root:not([data-theme]) .wp-1, :root[data-theme='deep'] .wp-1 { opacity: 1 !important; }
-:root[data-theme='violet'] .wp-2 { opacity: 1 !important; }
-:root[data-theme='light'] .wp-3 { opacity: 1 !important; }
-:root[data-theme='light'] .aurora-wallpaper::after { background: rgba(240,244,255,.42) !important; }
+:root[data-theme='light'] .aurora-wallpaper::after { background: rgba(240,244,255,.42); }
 
-/* 4) 浅透明：弹窗/页面能看到壁纸 */
+/* 浅透明：弹窗/页面能看到壁纸 */
 .overlay { background: rgba(6, 9, 20, 0.34) !important; }
 :root[data-theme='light'] .overlay { background: rgba(225, 232, 248, 0.22) !important; }
 .modal { background: rgba(20, 26, 46, 0.72) !important; -webkit-backdrop-filter: blur(18px) !important; backdrop-filter: blur(18px) !important; }
@@ -171,13 +135,3 @@
   --bubble-mine: linear-gradient(135deg, rgba(74,134,255,.82), rgba(123,91,255,.8)) !important;
 }
 .msg-bubble { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
-
-/* ===== v0.10.37 浮层退出动画：与打开对称的 0.62s 淡出缩小/滑出 ===== */
-.overlay.is-closing { animation: fe-fade-out 620ms cubic-bezier(.4,0,.7,.3) forwards !important; pointer-events: none; }
-.overlay.is-closing .modal { animation: fe-pop-out 620ms cubic-bezier(.4,0,.7,.3) forwards !important; }
-.overlay.is-closing .drawer { animation: fe-drawer-out 620ms cubic-bezier(.4,0,.7,.3) forwards !important; }
-@keyframes fe-fade-out { from { opacity: 1; } to { opacity: 0; } }
-@keyframes fe-pop-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(10px) scale(.98); } }
-@keyframes fe-drawer-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(30px); } }
-/* 图片查看器同样有退出动画 */
-.imgviewer.is-closing { animation: fe-fade-out 620ms cubic-bezier(.4,0,.7,.3) forwards !important; pointer-events: none; }

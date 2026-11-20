@@ -1,0 +1,12 @@
+/* 入口和按需加载状态：不遮住已就绪的导航。 */
+.fe-entry-state > .btn { width: auto; }
+.fe-route-state {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-2);
+}

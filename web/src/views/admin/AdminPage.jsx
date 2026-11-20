@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
 import { Avatar, Empty, SkeletonList, Spinner, toast } from '../../ui/primitives.jsx';
-import { api, shrinkImage } from '../../lib/api.js';
+import { api, apiUrl, shrinkImage } from '../../lib/api.js';
 import { relTime } from '../../lib/format.js';
 
 /* 管理后台：运营者看数据、管账号、管 Bot、审消息。只有 is_admin 能进。 */
@@ -39,7 +39,7 @@ const MODES = [
 
 const GATES = [
   { id: 'email', label: '只认邮箱码', hint: '必须填自己邮箱收到的验证码（推荐）' },
-  { id: 'both', label: '邮箱码或邀请码', hint: '配了发信就发验证码，也能用邀请码' },
+  { id: 'both', label: '邮箱码或邀请码', hint: '两种验证任选其一；发信设置不影响邀请码规则' },
   { id: 'invite', label: '只认邀请码', hint: '只有拿到邀请码的人能注册' },
   { id: 'none', label: '都不要', hint: '谁都能注册（不推荐，容易被刷）' },
 ];
@@ -79,7 +79,8 @@ export default function AdminPage({ token, me }) {
   const [siteCfg, setSiteCfg] = useState(null);
   const [gate, setGate] = useState('email');
   const [retention, setRetention] = useState(14);
-  const [smtp, setSmtp] = useState({ host: '', port: 465, secure: true, user: '', pass: '', from: '', fromName: '' });
+  const [smtp, setSmtp] = useState({ host: '', port: 587, secure: false, user: '', pass: '', from: '', fromName: '', clearPass: false });
+  const [mailFeedback, setMailFeedback] = useState(null);
   const [donation, setDonation] = useState({ link: '', images: [] });
   const donationFileRef = useRef(null);
   const [testTo, setTestTo] = useState('');
@@ -162,53 +163,96 @@ export default function AdminPage({ token, me }) {
     [token],
   );
 
+  const applySite = useCallback((cfg, updateSmtp) => {
+    setSiteCfg(cfg);
+    setGate(cfg.registerGate);
+    setRetention(cfg.retentionDays ?? 14);
+    if (updateSmtp) {
+      const s = cfg.smtp;
+      setSmtp({ host: s.host, port: s.port ?? '', secure: s.secure, user: s.user, pass: '', from: s.from, fromName: s.fromName, clearPass: false });
+    }
+    setDonation({ link: cfg.donationLink || '', images: cfg.donationImages || (cfg.donationImage ? [cfg.donationImage] : []) });
+  }, []);
+
   const loadSite = useCallback(async () => {
     try {
-      const [cfg, inv] = await Promise.all([api('/api/admin/site', { token }), api('/api/admin/invites', { token })]);
-      setSiteCfg(cfg);
-      setGate(cfg.registerGate || 'both');
-      setRetention(cfg.retentionDays ?? 14);
-      const s = cfg.smtp || {};
-      setSmtp({
-        host: s.host || '',
-        port: s.port || 465,
-        secure: s.secure === undefined ? true : !!s.secure,
-        user: s.user || '',
-        pass: '',
-        from: s.from || '',
-        fromName: s.fromName || '',
-      });
-      setInvites(inv.invites || []);
-      setDonation({ link: cfg.donationLink || '', images: cfg.donationImages || (cfg.donationImage ? [cfg.donationImage] : []) });
+      applySite(await api('/api/admin/site', { token }), true);
     } catch (err) {
       toast(err.message, 'error');
       setSiteCfg(false);
     }
-  }, [token]);
+  }, [token, applySite]);
 
-  const saveSite = async (patch, okText) => {
-    setBusy('/api/admin/site');
+  const loadInvites = useCallback(async () => {
     try {
-      const out = await api('/api/admin/site', { token, method: 'PATCH', body: patch });
-      toast(okText, 'ok');
-      setGate(out.registerGate || gate);
-      setRetention(out.retentionDays ?? retention);
-      await loadSite();
+      const inv = await api('/api/admin/invites', { token });
+      setInvites(inv.invites || []);
     } catch (err) {
       toast(err.message, 'error');
+    }
+  }, [token]);
+
+  const saveSite = async (patch, okText, savingSmtp = false) => {
+    setBusy('/api/admin/site');
+    if (savingSmtp) setMailFeedback(null);
+    try {
+      const out = await api('/api/admin/site', { token, method: 'PATCH', body: patch });
+      applySite(out, savingSmtp);
+      toast(savingSmtp && !out.smtpReady ? '发信设置已保存，但仍需补齐配置。' : okText, 'ok');
+    } catch (err) {
+      if (savingSmtp) setMailFeedback({ ok: false, text: err.message });
+      else toast(err.message, 'error');
     } finally {
       setBusy('');
     }
   };
 
-  const sendTestMail = async () => {
+  const savedSmtp = siteCfg?.smtp;
+  const smtpDirty = !!savedSmtp && (
+    smtp.host.trim() !== savedSmtp.host || String(smtp.port) !== String(savedSmtp.port ?? '') ||
+    smtp.secure !== savedSmtp.secure || smtp.user.trim() !== savedSmtp.user ||
+    smtp.from.trim() !== savedSmtp.from || smtp.fromName.trim() !== savedSmtp.fromName || Boolean(smtp.pass.trim()) || smtp.clearPass
+  );
+  const mailBusy = Boolean(busy);
+  const smtpProblems = siteCfg?.smtpIssues || [];
+  const updateSmtp = (patch) => {
+    setMailFeedback(null);
+    setSmtp((curr) => ({ ...curr, ...patch }));
+  };
+
+  const saveSmtp = (event) => {
+    event.preventDefault();
+    if (!siteCfg || !smtpDirty || mailBusy) return;
+    const port = Number(smtp.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535 || smtp.secure === null) {
+      setMailFeedback({ ok: false, text: '请填写有效的端口并选择加密方式。' });
+      return;
+    }
+    saveSite({
+      smtpHost: smtp.host.trim(), smtpPort: port, smtpSecure: smtp.secure, smtpUser: smtp.user.trim(),
+      smtpPass: smtp.pass || undefined, smtpClearPass: smtp.clearPass || undefined,
+      smtpFrom: smtp.from.trim(), smtpFromName: smtp.fromName.trim(),
+    }, '发信设置已保存；请试发确认是否可投递。', true);
+  };
+
+  const sendTestMail = async (event) => {
+    event.preventDefault();
+    const to = testTo.trim();
+    if (mailBusy || smtpDirty || !siteCfg?.smtpReady || !to) return;
     setBusy('/api/admin/site/test-mail');
+    setMailFeedback(null);
     try {
-      const out = await api('/api/admin/site/test-mail', { token, method: 'POST', body: { to: testTo.trim() || undefined } });
-      toast('测试邮件已发出，收件箱看看有没有', 'ok');
-      if (out && out.to) setTestTo(out.to);
-    } catch (err) {
-      toast(err.message, 'error');
+      /* 供应商错误不是本站离线；只在 SMTP 区域显示测试结果。 */
+      const res = await fetch(apiUrl('/api/admin/site/test-mail'), {
+        method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to }), signal: AbortSignal.timeout(18000),
+      });
+      const out = await res.json().catch(() => ({}));
+      setMailFeedback(res.ok && out.ok
+        ? { ok: true, text: 'SMTP 服务商已接收测试邮件，请检查收件箱和垃圾邮件。' }
+        : { ok: false, text: out.error || '试发失败，请稍后重试。', code: out.code, status: out.smtpStatus });
+    } catch {
+      setMailFeedback({ ok: false, text: '试发请求超时或未能连接本站，请稍后重试。' });
     } finally {
       setBusy('');
     }
@@ -223,7 +267,7 @@ export default function AdminPage({ token, me }) {
         body: { count: Number(invCount) || 1, maxUses: Number(invUses) || 1, expiresInDays: Number(invDays) || 0 },
       });
       toast('生成了 ' + (out.codes || []).length + ' 个邀请码', 'ok');
-      await loadSite();
+      await loadInvites();
     } catch (err) {
       toast(err.message, 'error');
     } finally {
@@ -236,7 +280,7 @@ export default function AdminPage({ token, me }) {
     try {
       await api('/api/admin/invites/' + encodeURIComponent(code), { token, method: 'DELETE' });
       toast('已删除该邀请码', 'ok');
-      await loadSite();
+      await loadInvites();
     } catch (err) {
       toast(err.message, 'error');
     } finally {
@@ -346,7 +390,10 @@ export default function AdminPage({ token, me }) {
     if (id === 'pending') loadPending();
     if (id === 'logins') loadLogins(onlyFail);
     if (id === 'guard') loadBans();
-    if (id === 'site' && !siteCfg) loadSite();
+    if (id === 'site') {
+      if (!siteCfg) loadSite();
+      if (!invites) loadInvites();
+    }
   };
 
   const c = overview?.counts || {};
@@ -511,7 +558,8 @@ export default function AdminPage({ token, me }) {
                 type="button"
                 key={g.id}
                 className={'admin-mode' + (gate === g.id ? ' on' : '')}
-                disabled={busy === '/api/admin/site'}
+                disabled={!siteCfg || mailBusy}
+                aria-pressed={gate === g.id}
                 onClick={() => saveSite({ registerGate: g.id }, '注册门禁已改为「' + g.label + '」')}
               >
                 <b>{g.label}</b>
@@ -542,7 +590,7 @@ export default function AdminPage({ token, me }) {
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              disabled={busy === '/api/admin/site'}
+              disabled={!siteCfg || mailBusy}
               onClick={() => saveSite({ retentionDays: Number(retention) || 0 }, '保留天数已保存')}
             >
               保存
@@ -552,134 +600,94 @@ export default function AdminPage({ token, me }) {
           <div className="admin-card-head admin-card-head-gap">
             <div>
               <h3>发信服务（SMTP）</h3>
-              <p>配好才能发邮箱验证码。以 QQ 邮箱为例：设置 → 账户 → 开启 IMAP/SMTP，拿到 16 位「授权码」当密码；服务器填 smtp.qq.com，端口 465 选 SSL（或 587 选 STARTTLS），登录账号和发件人都填你的 QQ 邮箱。填完点「试发一封」验证，收到就是成功；收不到先检查授权码有没有填成登录密码。不配也能用，只是注册只能走邀请码。</p>
+              <p>使用邮件服务商提供的服务器地址和授权码（或应用专用密码）。465 使用 TLS 直连，587 使用 STARTTLS。配置不完整时停止发码，不会改变现有注册门禁。</p>
             </div>
-            <span className={'admin-tag ' + (siteCfg && siteCfg.smtpReady ? 'ok' : 'danger')}>
-              {siteCfg && siteCfg.smtpReady ? '已就绪' : '未配置'}
+            <span className={'admin-tag ' + (siteCfg?.smtpReady && !smtpDirty ? 'ok' : 'danger')}>
+              {siteCfg === null ? '读取中' : siteCfg === false ? '读取失败' : smtpDirty ? '有未保存修改' : siteCfg.smtpReady ? '配置完整' : '配置不完整'}
             </span>
           </div>
-          <div className="admin-toolbar">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSmtp((s) => ({ ...s, host: 'smtp.qq.com', port: 465, secure: true, from: s.user || smtp.user, fromName: 'Everony' }))}>
-              <Icon name="mail" size={14} /> 一键填好 QQ 邮箱参数
+          {siteCfg === false ? (
+            <div className="admin-toolbar">
+              <span className="admin-inline-hint">读取失败，请重试，避免覆盖已保存的站点设置。</span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={loadSite}>重新读取</button>
+            </div>
+          ) : null}
+          {smtpProblems.length ? (
+            <ul className="admin-inline-hint" aria-label="已保存的发信配置问题">
+              {smtpProblems.map((issue) => <li key={issue.code}>{issue.message}</li>)}
+            </ul>
+          ) : null}
+          <form onSubmit={saveSmtp} aria-label="发信设置">
+            <fieldset disabled={!siteCfg || mailBusy} className="admin-form" style={{ border: 0, padding: 0, minWidth: 0 }}>
+              <label className="field">
+                <span className="field-label">服务器地址</span>
+                <input className="input" value={smtp.host} placeholder="smtp.example.com" autoCapitalize="none" spellCheck={false} onChange={(e) => updateSmtp({ host: e.target.value })} />
+              </label>
+              <label className="field">
+                <span className="field-label">端口</span>
+                <input className="input" type="number" min="1" max="65535" required value={smtp.port} onChange={(e) => updateSmtp({ port: e.target.value })} />
+              </label>
+              <label className="field">
+                <span className="field-label">加密方式</span>
+                <select className="input" value={smtp.secure === null ? '' : smtp.secure ? 'tls' : 'starttls'} required onChange={(e) => updateSmtp({ secure: e.target.value === 'tls' })}>
+                  <option value="" disabled>选择加密方式</option>
+                  <option value="tls">TLS 直连（一般 465）</option>
+                  <option value="starttls">STARTTLS（一般 587）</option>
+                </select>
+              </label>
+              <label className="field">
+                <span className="field-label">登录名</span>
+                <input className="input" value={smtp.user} placeholder="通常是发件邮箱；免认证中继可留空" autoComplete="off" autoCapitalize="none" spellCheck={false} onChange={(e) => updateSmtp({ user: e.target.value })} />
+              </label>
+              <label className="field">
+                <span className="field-label">授权码 / 应用专用密码</span>
+                <input className="input" type="password" autoComplete="new-password" disabled={smtp.clearPass} value={smtp.pass} placeholder={savedSmtp?.hasPass ? '已保存，留空保留' : '使用服务商提供的 SMTP 授权码'} onChange={(e) => updateSmtp({ pass: e.target.value })} />
+              </label>
+              <label className="field">
+                <span className="field-label">发件人地址</span>
+                <input className="input" type="email" value={smtp.from} placeholder="仅当登录名是邮箱时可留空" autoCapitalize="none" spellCheck={false} onChange={(e) => updateSmtp({ from: e.target.value })} />
+              </label>
+              <label className="field">
+                <span className="field-label">发件人名称</span>
+                <input className="input" value={smtp.fromName} placeholder="Everony" onChange={(e) => updateSmtp({ fromName: e.target.value })} />
+              </label>
+              {savedSmtp?.hasPass ? (
+                <label className="field">
+                  <span className="field-label">移除旧授权码</span>
+                  <span><input type="checkbox" checked={smtp.clearPass} onChange={(e) => updateSmtp(e.target.checked ? { clearPass: true, pass: '' } : { clearPass: false })} /> 保存时清除</span>
+                </label>
+              ) : null}
+            </fieldset>
+            <div className="admin-toolbar">
+              <button type="button" className="btn btn-ghost btn-sm" disabled={!siteCfg || mailBusy} onClick={() => updateSmtp({ port: 465, secure: true })}>设为 465 · TLS</button>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={!siteCfg || mailBusy} onClick={() => updateSmtp({ port: 587, secure: false })}>设为 587 · STARTTLS</button>
+              <button type="submit" className="btn btn-primary btn-sm" disabled={!siteCfg || !smtpDirty || mailBusy}>
+                {busy === '/api/admin/site' ? '保存中…' : '保存发信设置'}
+              </button>
+            </div>
+          </form>
+          <form className="admin-toolbar" onSubmit={sendTestMail} aria-label="试发测试邮件">
+            <label className="field">
+              <span className="field-label">测试收件邮箱</span>
+              <input className="input" type="email" required autoComplete="off" disabled={mailBusy} value={testTo} placeholder="请明确填入测试收件地址" onChange={(e) => { setTestTo(e.target.value); setMailFeedback(null); }} />
+            </label>
+            <button type="submit" className="btn btn-ghost btn-sm" disabled={mailBusy || smtpDirty || !siteCfg?.smtpReady || !testTo.trim()}>
+              <Icon name="mail" size={14} /> {busy === '/api/admin/site/test-mail' ? '试发中…' : '试发一封'}
             </button>
-            <span className="admin-inline-hint">填完只需再填 QQ 邮箱「授权码」（不是登录密码），点保存 → 试发一封验证。</span>
-          </div>
-          <div className="admin-form">
-            <label className="field">
-              <span className="field-label">服务器地址</span>
-              <input
-                className="input"
-                value={smtp.host}
-                placeholder="smtp.example.com"
-                onChange={(e) => setSmtp({ ...smtp, host: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">端口</span>
-              <input
-                className="input"
-                type="number"
-                value={smtp.port}
-                placeholder="465"
-                onChange={(e) => setSmtp({ ...smtp, port: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">加密方式</span>
-              <select
-                className="input"
-                value={smtp.secure ? 'ssl' : 'starttls'}
-                onChange={(e) => setSmtp({ ...smtp, secure: e.target.value === 'ssl' })}
-              >
-                <option value="ssl">SSL 直连（一般 465）</option>
-                <option value="starttls">STARTTLS（一般 587）</option>
-              </select>
-            </label>
-            <label className="field">
-              <span className="field-label">登录账号</span>
-              <input
-                className="input"
-                value={smtp.user}
-                placeholder="通常就是邮箱地址"
-                onChange={(e) => setSmtp({ ...smtp, user: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">密码 / 授权码</span>
-              <input
-                className="input"
-                type="password"
-                value={smtp.pass}
-                placeholder={siteCfg && siteCfg.smtp && siteCfg.smtp.hasPass ? '已保存，留空不改' : '邮箱的授权码'}
-                onChange={(e) => setSmtp({ ...smtp, pass: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">发件人地址</span>
-              <input
-                className="input"
-                value={smtp.from}
-                placeholder="不填就用登录账号"
-                onChange={(e) => setSmtp({ ...smtp, from: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">发件人名字</span>
-              <input
-                className="input"
-                value={smtp.fromName}
-                placeholder="Everony"
-                onChange={(e) => setSmtp({ ...smtp, fromName: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">试发到</span>
-              <input
-                className="input"
-                value={testTo}
-                placeholder="留空发到自己账号邮箱"
-                onChange={(e) => setTestTo(e.target.value)}
-              />
-            </label>
-          </div>
-          <div className="admin-toolbar">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              disabled={busy === '/api/admin/site'}
-              onClick={() =>
-                saveSite(
-                  {
-                    smtpHost: smtp.host.trim(),
-                    smtpPort: Number(smtp.port) || 465,
-                    smtpSecure: !!smtp.secure,
-                    smtpUser: smtp.user.trim(),
-                    smtpPass: smtp.pass,
-                    smtpFrom: smtp.from.trim(),
-                    smtpFromName: smtp.fromName.trim(),
-                  },
-                  '发信设置已保存',
-                )
-              }
-            >
-              保存发信设置
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              disabled={busy === '/api/admin/site/test-mail'}
-              onClick={sendTestMail}
-            >
-              <Icon name="mail" size={14} /> 试发一封
-            </button>
-          </div>
+            <span className="admin-inline-hint">{smtpDirty ? '请先保存修改再试发。' : '试发只使用已保存的参数。'}</span>
+          </form>
+          {mailFeedback ? (
+            <p role={mailFeedback.ok ? 'status' : 'alert'} className={'admin-tag ' + (mailFeedback.ok ? 'ok' : 'danger')}>
+              {mailFeedback.text}{mailFeedback.code ? '（' + mailFeedback.code + (mailFeedback.status ? ' / ' + mailFeedback.status : '') + '）' : ''}
+            </p>
+          ) : null}
 
           <div className="admin-card-head admin-card-head-gap">
             <div>
               <h3>邀请码</h3>
-              <p>注册时填它就能过门禁。每个码能用几次、多久过期都由你定。</p>
+              <p>仅当注册门禁允许邀请码时生效。你可以设置每个码的使用次数和有效期。</p>
             </div>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadSite()}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={loadInvites}>
               <Icon name="refresh" size={15} /> 刷新
             </button>
           </div>
@@ -696,7 +704,7 @@ export default function AdminPage({ token, me }) {
               <Icon name="clock" size={15} />
               <input type="number" min="0" max="3650" value={invDays} onChange={(e) => setInvDays(e.target.value)} aria-label="有效天数" />
             </label>
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy === '/api/admin/invites'} onClick={makeInvites}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={mailBusy} onClick={makeInvites}>
               <Icon name="plus" size={14} /> 生成
             </button>
           </div>
@@ -738,7 +746,7 @@ export default function AdminPage({ token, me }) {
                     <button
                       type="button"
                       className="btn btn-danger btn-sm"
-                      disabled={busy === '/api/admin/invites/' + it.code}
+                      disabled={mailBusy}
                       onClick={() => dropInvite(it.code)}
                     >
                       删除
@@ -798,7 +806,7 @@ export default function AdminPage({ token, me }) {
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              disabled={busy === '/api/admin/site'}
+              disabled={!siteCfg || mailBusy}
               onClick={() => saveSite({ donationLink: donation.link.trim(), donationImages: donation.images }, '支持配置已保存')}
             >
               保存支持配置

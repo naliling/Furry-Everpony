@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from './icons.jsx';
 import { colorFor, statusMeta } from '../lib/format.js';
@@ -6,7 +6,6 @@ import { colorFor, statusMeta } from '../lib/format.js';
 export const cx = (...args) => args.filter(Boolean).join(' ');
 
 /* ---------- 浮层栈：统一处理 Esc，最上层先关 ---------- */
-let overlayDepth = 0;
 const escStack = [];
 let escInstalled = false;
 
@@ -17,19 +16,16 @@ function ensureEscListener() {
     'keydown',
     (e) => {
       if (e.key !== 'Escape' || !escStack.length) return;
-      const top = escStack[escStack.length - 1];
-      if (top.enabled()) {
-        e.preventDefault();
-        e.stopPropagation();
-        top.close();
-      }
+      e.preventDefault();
+      e.stopPropagation();
+      escStack[escStack.length - 1]();
     },
     true
   );
 }
 
 export function overlayOpen() {
-  return overlayDepth > 0;
+  return escStack.length > 0;
 }
 
 /* 安卓返回键：先关最上层浮层；返回 true 表示这次返回已被页面消费 */
@@ -37,45 +33,104 @@ export function installBackHandler() {
   if (typeof window === 'undefined') return;
   window.__feBack = () => {
     if (!escStack.length) return false;
-    const top = escStack[escStack.length - 1];
-    if (!top.enabled()) return false;
-    top.close();
+    escStack[escStack.length - 1]();
     return true;
   };
 }
 
-/**
- * 浮层退出动画：先播 0.6s 淡出缩小，播完再真正卸载 DOM，避免关闭瞬间消失/掉帧。
- * Esc / 安卓返回 / 点遮罩 / 点关闭 都走 beginClose，保证开关动画对称。
- */
-export function useOverlayClose(onClose, duration = 620) {
-  const [closing, setClosing] = useState(false);
-  const timer = useRef(null);
-  const start = () => {
-    if (closing) return;
-    setClosing(true);
-    timer.current = setTimeout(() => onClose(), duration);
-  };
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-  return { closing, beginClose: start };
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+const motionPreference = () => window.matchMedia?.(REDUCED_MOTION);
+export const prefersReducedMotion = () => Boolean(motionPreference()?.matches);
+
+function timeInMs(value) {
+  // 透明度是公共层的首项过渡，计算后样式已经解析 CSS 变量。
+  const first = value.split(',')[0].trim();
+  return (parseFloat(first) || 0) * (first.endsWith('ms') ? 1 : 1000);
 }
 
+export function useOpacityExit(layerRef, exiting, onFinish) {
+  const finishRef = useRef(onFinish);
+  finishRef.current = onFinish;
+  useLayoutEffect(() => {
+    if (!exiting) return;
+    const layer = layerRef.current;
+    const preference = motionPreference();
+    if (!layer || preference?.matches) { finishRef.current(); return; }
+    const style = getComputedStyle(layer);
+    const duration = timeInMs(style.transitionDuration);
+    if (!duration || Number(style.opacity) === 0) { finishRef.current(); return; }
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      finishRef.current();
+    };
+    const onEnd = (event) => {
+      if (event.target === layer && event.propertyName === 'opacity' && Number(getComputedStyle(layer).opacity) === 0) finish();
+    };
+    const onPreference = (event) => { if (event.matches) finish(); };
+    layer.addEventListener('transitionend', onEnd);
+    preference?.addEventListener?.('change', onPreference);
+    // 只为浏览器中断或丢失 transitionend 的情况兜底，不作为正常的关闭时机。
+    const fallback = window.setTimeout(finish, duration + timeInMs(style.transitionDelay) + 80);
+    return () => {
+      window.clearTimeout(fallback);
+      layer.removeEventListener('transitionend', onEnd);
+      preference?.removeEventListener?.('change', onPreference);
+    };
+  }, [exiting, layerRef]);
+}
+
+/* 弹层与短反馈共用可反向的透明度过渡，过渡结束才卸载。 */
+export function useOverlayClose(onClose) {
+  const [closing, setClosing] = useState(false);
+  const layerRef = useRef(null);
+  const phase = useRef('open');
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  const finish = useCallback(() => {
+    if (phase.current === 'closed') return;
+    phase.current = 'closed';
+    closeRef.current?.();
+  }, []);
+
+  const beginClose = useCallback(() => {
+    if (phase.current !== 'open') return;
+    const layer = layerRef.current;
+    if (!layer || prefersReducedMotion() || Number(getComputedStyle(layer).opacity) === 0) {
+      finish();
+      return;
+    }
+    phase.current = 'closing';
+    setClosing(true);
+  }, [finish]);
+
+  useLayoutEffect(() => {
+    const layer = layerRef.current;
+    if (!layer || prefersReducedMotion()) return;
+    // 进场前建立起始样式，兼容不支持 @starting-style 的浏览器。默认样式仍可见。
+    layer.classList.add('is-entering');
+    getComputedStyle(layer).opacity;
+    layer.classList.remove('is-entering');
+  }, []);
+  useOpacityExit(layerRef, closing, finish);
+
+  return { closing, beginClose, layerRef };
+}
 export function useOverlay(onClose, enabled = true) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  const enabledRef = useRef(enabled);
-  enabledRef.current = enabled;
   useEffect(() => {
+    if (!enabled) return;
     ensureEscListener();
-    overlayDepth += 1;
-    const entry = { close: () => closeRef.current(), enabled: () => enabledRef.current };
-    escStack.push(entry);
+    const close = () => closeRef.current();
+    escStack.push(close);
     return () => {
-      overlayDepth = Math.max(0, overlayDepth - 1);
-      const i = escStack.indexOf(entry);
+      const i = escStack.indexOf(close);
       if (i >= 0) escStack.splice(i, 1);
     };
-  }, []);
+  }, [enabled]);
 }
 
 /* 只在没有浮层打开时才响应 Esc（用于返回/关面板） */
@@ -127,12 +182,25 @@ export function toast(message, type = 'info', duration = 2600) {
   }, duration);
 }
 
+function ToastItem({ item, onRemove }) {
+  const { closing, beginClose, layerRef } = useOverlayClose(onRemove);
+  useEffect(() => {
+    if (item.expired) beginClose();
+  }, [item.expired, beginClose]);
+  return (
+    <div ref={layerRef} className={cx('toast', 'motion-layer', 'toast-' + item.type, closing && 'is-closing')} aria-hidden={closing || undefined}>
+      <Icon name={item.type === 'error' ? 'warning' : item.type === 'success' ? 'check' : 'info'} size={16} />
+      <span>{item.message}</span>
+    </div>
+  );
+}
+
 export function Toaster() {
   const [items, setItems] = useState([]);
   useEffect(() => {
     const onItem = (item) => {
       if (item.remove) {
-        setItems((prev) => prev.filter((x) => x.id !== item.id));
+        setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, expired: true } : x));
       } else {
         setItems((prev) => [...prev.slice(-3), item]);
       }
@@ -144,10 +212,7 @@ export function Toaster() {
   return createPortal(
     <div className="toaster" role="status" aria-live="polite">
       {items.map((item) => (
-        <div key={item.id} className={cx('toast', 'toast-' + item.type)}>
-          <Icon name={item.type === 'error' ? 'warning' : item.type === 'success' ? 'check' : 'info'} size={16} />
-          <span>{item.message}</span>
-        </div>
+        <ToastItem key={item.id} item={item} onRemove={() => setItems((prev) => prev.filter((x) => x.id !== item.id))} />
       ))}
     </div>,
     document.body
@@ -194,37 +259,33 @@ export function ContextMenu({ x, y, items, onClose, title }) {
   const ref = useRef(null);
   const isMobile = useIsMobile();
   const [pos, setPos] = useState(null);
-  const { closing, beginClose } = useOverlayClose(onClose, 520);
+  const { closing, beginClose, layerRef } = useOverlayClose(onClose);
   useOverlay(beginClose);
 
   useLayoutEffect(() => {
     if (isMobile) return;
     const el = ref.current;
     if (!el) return;
-    const r = el.getBoundingClientRect();
     const pad = 10;
-    const left = Math.min(Math.max(pad, x), Math.max(pad, window.innerWidth - r.width - pad));
-    const top = Math.min(Math.max(pad, y), Math.max(pad, window.innerHeight - r.height - pad));
+    // 用布局尺寸，不把进场缩放算进菜单定位。
+    const left = Math.min(Math.max(pad, x), Math.max(pad, window.innerWidth - el.offsetWidth - pad));
+    const top = Math.min(Math.max(pad, y), Math.max(pad, window.innerHeight - el.offsetHeight - pad));
     setPos({ left, top });
   }, [x, y, isMobile]);
-
-  useEffect(() => {
-    if (!isMobile) return undefined;
-    const close = () => beginClose();
-    return () => close;
-  }, [isMobile, onClose]);
 
   const usable = items.filter(Boolean);
   const body = (
     <div
-      className={cx('ctx-layer', isMobile && 'ctx-layer-mobile', closing && 'is-closing')}
+      ref={layerRef}
+      className={cx('ctx-layer', 'motion-layer', isMobile && 'ctx-layer-mobile', closing && 'is-closing')}
       onContextMenu={(e) => e.preventDefault()}
       onPointerDown={(e) => { if (e.target === e.currentTarget) beginClose(); }}
     >
       {isMobile ? <div className="ctx-mask" onPointerDown={beginClose} /> : null}
       <div
         ref={ref}
-        className={cx('ctx-menu', isMobile && 'ctx-sheet', closing && 'is-closing')}
+        className={cx('ctx-menu', 'motion-surface', isMobile && 'ctx-sheet')}
+        inert={closing}
         style={!isMobile && pos ? { left: pos.left + 'px', top: pos.top + 'px' } : undefined}
         role="menu"
         onPointerDown={(e) => e.stopPropagation()}
@@ -292,12 +353,23 @@ export function useLongPress(onLongPress, delay = 460) {
 }
 
 /* ---------- 弹窗 ---------- */
-export function Modal({ title, subtitle, icon, children, footer, onClose, width = 480, className = '', headerExtra, closeOnMask = true }) {
-  const { closing, beginClose } = useOverlayClose(onClose);
-  useOverlay(beginClose);
-  return createPortal(
-    <div className={cx('overlay', closing && 'is-closing')} onPointerDown={(e) => { if (closeOnMask && e.target === e.currentTarget) beginClose(); }}>
-      <div className={cx('modal', className, closing && 'is-closing')} style={{ maxWidth: width }} role="dialog" aria-modal="true" aria-label={title || '对话框'}>
+const OverlayDismissContext = createContext(null);
+
+export function OverlayDismissButton({ onClick, type = 'button', ...props }) {
+  const dismiss = useContext(OverlayDismissContext);
+  return <button {...props} type={type} onClick={(event) => {
+    onClick?.(event);
+    if (!event.defaultPrevented) dismiss?.();
+  }} />;
+}
+
+export function Modal({ title, subtitle, icon, children, footer, onClose, width = 480, className = '', headerExtra, closeOnMask = true, dismissible = true }) {
+  const { closing, beginClose, layerRef } = useOverlayClose(onClose);
+  const dismiss = useCallback(() => { if (dismissible) beginClose(); }, [beginClose, dismissible]);
+  useOverlay(dismiss);
+  const layer = createPortal(
+    <div ref={layerRef} className={cx('overlay', 'motion-layer', closing && 'is-closing')} onPointerDown={(e) => { if (closeOnMask && e.target === e.currentTarget) dismiss(); }}>
+      <div className={cx('modal', 'motion-surface', className)} style={{ maxWidth: width }} role="dialog" aria-modal="true" aria-label={title || '对话框'} inert={closing}>
         {title ? (
           <header className="modal-head">
             <div className="modal-head-main">
@@ -309,27 +381,28 @@ export function Modal({ title, subtitle, icon, children, footer, onClose, width 
             </div>
             <div className="modal-head-extra">
               {headerExtra}
-              <button type="button" className="icon-btn" onClick={beginClose} aria-label="关闭">
+              <button type="button" className="icon-btn" onClick={dismiss} disabled={!dismissible} aria-label="关闭">
                 <Icon name="close" size={18} />
               </button>
             </div>
           </header>
         ) : null}
         <div className="modal-body">{children}</div>
-        {footer ? <footer className="modal-foot">{footer}</footer> : null}
+        {footer ? <footer className="modal-foot">{typeof footer === 'function' ? footer(beginClose) : footer}</footer> : null}
       </div>
     </div>,
     document.body
   );
+  return <OverlayDismissContext.Provider value={dismiss}>{layer}</OverlayDismissContext.Provider>;
 }
 
 export function Drawer({ title, subtitle, onClose, children, footer, width = 420, className = '', icon }) {
-  const { closing, beginClose } = useOverlayClose(onClose);
+  const { closing, beginClose, layerRef } = useOverlayClose(onClose);
   useOverlay(beginClose);
   const isMobile = useIsMobile();
-  return createPortal(
-    <div className={cx('overlay', 'overlay-drawer', closing && 'is-closing')} onPointerDown={(e) => { if (e.target === e.currentTarget) beginClose(); }}>
-      <aside className={cx('drawer', className, closing && 'is-closing')} style={!isMobile ? { width } : undefined} role="dialog" aria-modal="true" aria-label={title || '抽屉'}>
+  const layer = createPortal(
+    <div ref={layerRef} className={cx('overlay', 'overlay-drawer', 'motion-layer', closing && 'is-closing')} onPointerDown={(e) => { if (e.target === e.currentTarget) beginClose(); }}>
+      <aside className={cx('drawer', 'motion-surface', className)} style={!isMobile ? { width } : undefined} role="dialog" aria-modal="true" aria-label={title || '抽屉'} inert={closing}>
         <header className="drawer-head">
           <button type="button" className="icon-btn drawer-back" onClick={beginClose} aria-label="返回">
             <Icon name="back" size={20} />
@@ -351,17 +424,18 @@ export function Drawer({ title, subtitle, onClose, children, footer, width = 420
     </div>,
     document.body
   );
+  return <OverlayDismissContext.Provider value={beginClose}>{layer}</OverlayDismissContext.Provider>;
 }
 
 export function Confirm({ title = '确认操作', message, confirmText = '确定', cancelText = '取消', danger, onConfirm, onClose }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const run = async () => {
+  const run = async (dismiss) => {
     setBusy(true);
     setError('');
     try {
       await onConfirm();
-      onClose();
+      dismiss();
     } catch (err) {
       setError(err.message || '操作失败');
     } finally {
@@ -374,14 +448,15 @@ export function Confirm({ title = '确认操作', message, confirmText = '确定
       icon={danger ? 'warning' : 'info'}
       onClose={onClose}
       width={400}
-      footer={
+      dismissible={!busy}
+      footer={(dismiss) => (
         <>
-          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>{cancelText}</button>
-          <button type="button" className={cx('btn', danger ? 'btn-danger' : 'btn-primary')} onClick={run} disabled={busy}>
+          <OverlayDismissButton className="btn btn-ghost" disabled={busy}>{cancelText}</OverlayDismissButton>
+          <button type="button" className={cx('btn', danger ? 'btn-danger' : 'btn-primary')} onClick={() => run(dismiss)} disabled={busy}>
             {busy ? '处理中…' : confirmText}
           </button>
         </>
-      }
+      )}
     >
       {message ? <p className="confirm-text">{message}</p> : null}
       {error ? <p className="form-error">{error}</p> : null}
@@ -504,33 +579,37 @@ export function Badge({ count, dot, className = '' }) {
 export function useSwipeBack(enabled, onBack) {
   const [offset, setOffset] = useState(0);
   const start = useRef(null);
-  const cb = useRef(onBack);
-  cb.current = onBack;
+  const distance = useRef(0);
+  const reset = () => {
+    start.current = null;
+    distance.current = 0;
+    setOffset(0);
+  };
+  useEffect(() => { if (!enabled) reset(); }, [enabled]);
   const handlers = {
     onTouchStart: (e) => {
+      reset();
       if (!enabled || e.touches.length !== 1) return;
       const t = e.touches[0];
-      start.current = t.clientX < 34 ? { x: t.clientX, y: t.clientY, active: true } : null;
+      if (t.clientX < 34) start.current = { x: t.clientX, y: t.clientY };
     },
     onTouchMove: (e) => {
-      if (!start.current || !start.current.active) return;
+      if (!start.current) return;
+      if (e.touches.length !== 1) { reset(); return; }
       const t = e.touches[0];
       const dx = t.clientX - start.current.x;
       const dy = Math.abs(t.clientY - start.current.y);
-      if (dy > 60) {
-        start.current = null;
-        setOffset(0);
-        return;
-      }
-      if (dx > 0) setOffset(Math.min(140, dx));
+      // 纵向为主时让原生列表滚动，不搬动整个聊天列。
+      if (dy > 12 && dy >= dx) { reset(); return; }
+      distance.current = dx > 8 && dx > dy * 1.4 ? Math.min(140, dx) : 0;
+      setOffset(distance.current);
     },
     onTouchEnd: () => {
-      if (!start.current) return;
-      const should = offset > 86;
-      start.current = null;
-      setOffset(0);
-      if (should) cb.current();
+      const shouldReturn = start.current && distance.current > 86;
+      reset();
+      if (shouldReturn) onBack();
     },
+    onTouchCancel: reset,
   };
   return { offset, handlers };
 }

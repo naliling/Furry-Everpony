@@ -2432,76 +2432,7 @@
   border-color: rgba(30, 55, 120, 0.14);
 }
 
-/* ============================================================
-   v0.10.1 · 动效节奏
-   页面切换、弹窗抽屉、消息入场、列表 stagger、按钮 hover、
-   主题切换过渡；prefers-reduced-motion 由 theme.css 兜底。
-   ============================================================ */
-@keyframes fe-page-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.997);
-  }
-}
-@keyframes fe-msg-rise {
-  from {
-    opacity: 0;
-    transform: translateY(12px) scale(0.985);
-  }
-}
-@keyframes fe-lift-in {
-  from {
-    opacity: 0;
-    transform: translateY(22px) scale(0.96);
-  }
-}
-@keyframes fe-drawer-r {
-  from {
-    opacity: 0;
-    transform: translateX(34px);
-  }
-}
-
-@media (min-width: 780px) {
-  .contacts-tab,
-  .discover-tab,
-  .settings-page,
-  .chat-tab {
-    animation: fe-page-in 340ms var(--ease) both;
-  }
-}
-.msg {
-  animation: fe-msg-rise 340ms cubic-bezier(0.2, 0.9, 0.25, 1.03) both;
-}
-.overlay {
-  animation: fe-fade 220ms var(--ease);
-}
-.modal {
-  animation: fe-lift-in 300ms cubic-bezier(0.18, 0.9, 0.24, 1.04);
-}
-.drawer {
-  animation: fe-drawer-r 300ms var(--ease);
-}
-.ctx-menu {
-  animation: fe-pop 200ms var(--ease);
-}
-.ctx-sheet {
-  animation: fe-sheet-up 280ms var(--ease);
-}
-
-/* 兜底：动画没跑起来（安卓 WebView 关动画 / 省电模式 / 减弱动态效果）时，
-   浮层必须仍然可见可点——不能停在 opacity:0，只剩一层黑遮罩 */
-@media (prefers-reduced-motion: reduce) {
-  .overlay,
-  .modal,
-  .drawer,
-  .ctx-menu,
-  .ctx-sheet {
-    animation: none !important;
-  }
-}
-
-/* 手机端：遮罩不用毛玻璃（安卓 WebView 上容易整屏发黑），抽屉不做位移动画 */
+/* 手机遮罩不用实时毛玻璃，避免部分安卓浏览器合成时黑屏。 */
 @media (max-width: 779px) {
   .overlay {
     -webkit-backdrop-filter: none;
@@ -2513,26 +2444,8 @@
     backdrop-filter: none;
     background: rgba(4, 8, 18, 0.94);
   }
-  /* 手机端同样保留打开/关闭动画，不再 animation:none */
 }
 
-/* 列表项依次入场（纯 CSS，不需要组件放变量） */
-.conv-list .conv-item:nth-child(2) { animation-delay: 18ms; }
-.conv-list .conv-item:nth-child(3) { animation-delay: 36ms; }
-.conv-list .conv-item:nth-child(4) { animation-delay: 54ms; }
-.conv-list .conv-item:nth-child(5) { animation-delay: 72ms; }
-.conv-list .conv-item:nth-child(6) { animation-delay: 90ms; }
-.conv-list .conv-item:nth-child(7) { animation-delay: 108ms; }
-.conv-list .conv-item:nth-child(8) { animation-delay: 126ms; }
-.conv-list .conv-item:nth-child(9) { animation-delay: 144ms; }
-.conv-list .conv-item:nth-child(10) { animation-delay: 162ms; }
-.msg-list > .msg:nth-child(2) { animation-delay: 24ms; }
-.msg-list > .msg:nth-child(3) { animation-delay: 48ms; }
-.msg-list > .msg:nth-child(4) { animation-delay: 72ms; }
-.msg-list > .msg:nth-child(5) { animation-delay: 96ms; }
-.msg-list > .msg:nth-child(6) { animation-delay: 120ms; }
-.msg-list > .msg:nth-child(7) { animation-delay: 144ms; }
-.msg-list > .msg:nth-child(8) { animation-delay: 168ms; }
 
 /* 按钮与图标 hover 反馈 */
 .btn:hover:not(:disabled) {
@@ -3863,8 +3776,9 @@ body,
   color: var(--text-2);
   background: var(--bg-panel, rgba(255, 255, 255, 0.04));
   border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
-  transition: color 0.18s, border-color 0.18s, background 0.18s;
+  transition: color var(--dur), border-color var(--dur), background var(--dur), transform var(--dur);
 }
+.admin-tabs button:active { transform: scale(.97); }
 .admin-tabs button.on {
   color: var(--text-1);
   border-color: var(--brand, #22d3ee);
@@ -4355,27 +4269,17 @@ body,
   box-shadow: 0 12px 28px -14px rgba(91,140,255,.85), inset 0 1px 0 rgba(255,255,255,.2);
 }
 .plaza-brand-mark img { width: 100%; height: 100%; object-fit: contain; }
-/* 全站进场动画：卡片、面板错峰淡入 */
-.bot-card, .conv-item, .settings-card, .group-card {
-  animation: fe-rise-in 420ms cubic-bezier(.22,.61,.36,1) both;
+/* 卡片使用轻反馈，而不是每次刷新或重新排序都错峰淡入。 */
+:is(.bot-card, .group-card, .friend-card) {
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.bot-card:nth-child(2), .conv-item:nth-child(2) { animation-delay: 45ms; }
-.bot-card:nth-child(3), .conv-item:nth-child(3) { animation-delay: 90ms; }
-.bot-card:nth-child(4), .conv-item:nth-child(4) { animation-delay: 135ms; }
-.bot-card:nth-child(5), .conv-item:nth-child(5) { animation-delay: 180ms; }
-@keyframes fe-rise-in {
-  from { opacity: 0; transform: translate3d(0, 14px, 0); }
-  to { opacity: 1; transform: translate3d(0, 0, 0); }
+@media (hover: hover) {
+  :is(.bot-card, .group-card, .friend-card):hover {
+    transform: translateY(-2px);
+    box-shadow: 0 20px 44px -24px rgba(5, 8, 22, .65);
+  }
 }
-/* 玻璃卡 hover 优雅浮起（只动 transform/shadow） */
-.bot-card, .group-card {
-  transition: transform 280ms cubic-bezier(.22,.61,.36,1), box-shadow 280ms cubic-bezier(.22,.61,.36,1), border-color 280ms;
-}
-.bot-card:hover, .group-card:hover {
-  transform: translate3d(0,-6px,0) scale(1.012);
-  box-shadow: 0 26px 60px -24px rgba(5,8,22,.7);
-  border-color: rgba(255,255,255,.28);
-}
+:is(.bot-card, .group-card, .friend-card):active { transform: scale(.99); }
 
 /* ===== v0.10.35 管理端消息终端样式 ===== */
 .admin-terminal {

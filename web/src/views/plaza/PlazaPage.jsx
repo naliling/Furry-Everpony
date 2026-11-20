@@ -1,48 +1,74 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
-import { Avatar, Empty, SkeletonList, toast } from '../../ui/primitives.jsx';
-import { api, serverBase } from '../../lib/api.js';
+import { Avatar, Empty, SkeletonList } from '../../ui/primitives.jsx';
+import { api } from '../../lib/api.js';
 
 /**
  * 未登录时的首页：Bot 广场。
  * 不做鉴权请求（/api/bots/public 允许匿名），点任何卡片都引导去登录/注册。
  */
-export default function PlazaPage({ onLogin }) {
+export default function PlazaPage({ onLogin, onRegister }) {
   const [q, setQ] = useState('');
   const [bots, setBots] = useState(null);
   const [note, setNote] = useState('');
-  const [online, setOnline] = useState(0);
+  const [failure, setFailure] = useState('');
+  const query = useRef('');
   const timerRef = useRef(null);
+  const request = useRef(null);
 
-  const load = useCallback(async (keyword = '') => {
+  const load = useCallback(async (keyword = '', background = false) => {
+    if (background && request.current) return;
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    if (!background) setFailure('');
     try {
-      const data = await api('/api/bots/public?q=' + encodeURIComponent(keyword) + '&limit=60');
-      const list = data.bots || [];
-      setBots(list);
+      const params = new URLSearchParams({ q: keyword, limit: '60' });
+      const data = await api('/api/bots/public?' + params, { signal: controller.signal, timeoutMs: 6500 });
+      if (controller.signal.aborted || query.current !== keyword) return;
+      setBots(data.bots || []);
       setNote(data.note || '');
-      setOnline(list.filter((b) => b.online).length);
+      setFailure('');
     } catch (err) {
+      if (controller.signal.aborted || background) return;
       setBots([]);
-      toast(err.message, 'error');
+      setFailure(err.message);
+    } finally {
+      if (request.current === controller) request.current = null;
     }
   }, []);
 
   useEffect(() => {
     load('');
-    /* 在线状态 20 秒刷一次，首页不用手动刷新 */
-    const id = window.setInterval(() => load(q.trim()), 20000);
-    return () => window.clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const id = window.setInterval(() => {
+      if (!document.hidden && timerRef.current === null) load(query.current, true);
+    }, 20000);
+    return () => {
+      window.clearInterval(id);
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+      request.current?.abort();
+    };
   }, [load]);
 
   const onSearch = (value) => {
+    const keyword = value.trim();
     setQ(value);
+    if (query.current === keyword) return;
+    query.current = keyword;
+    request.current?.abort();
+    setBots(null);
+    setFailure('');
     window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => load(value.trim()), 300);
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      load(keyword);
+    }, 250);
   };
 
   const siteHost = (typeof window !== 'undefined' && window.location.host) || '本站';
   const list = bots || [];
+  const online = list.filter((bot) => bot.online).length;
 
   return (
     <div className="plaza-page">
@@ -57,7 +83,7 @@ export default function PlazaPage({ onLogin }) {
         </div>
         <div className="plaza-top-actions">
           <button type="button" className="btn btn-ghost btn-sm" onClick={onLogin}>登录</button>
-          <button type="button" className="btn btn-primary btn-sm" onClick={onLogin}><Icon name="plus" size={15} /> 注册</button>
+          <button type="button" className="btn btn-primary btn-sm" onClick={onRegister}><Icon name="plus" size={15} /> 注册</button>
         </div>
       </header>
 
@@ -77,7 +103,10 @@ export default function PlazaPage({ onLogin }) {
       </section>
 
       <section className="plaza-list-wrap">
-        {bots === null ? <SkeletonList rows={6} /> : list.length === 0 ? (
+        {failure ? (
+          <Empty icon="warning" title="暂时没加载到 Bot 广场" sub={failure}
+            action={<button type="button" className="btn btn-ghost btn-sm" onClick={() => load(query.current)}>重试</button>} />
+        ) : bots === null ? <SkeletonList rows={4} /> : list.length === 0 ? (
           <Empty icon="bot" title={q ? '没有找到匹配的 Bot' : '广场还空着'} sub={q ? '换个关键词试试' : (note || '等运营者把 Bot 公开出来，这里就会出现')} />
         ) : (
           <div className="bot-grid plaza-grid">

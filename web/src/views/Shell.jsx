@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../ui/icons.jsx';
 import RailIcon from '../ui/rail-icons.jsx';
 import { Avatar, Badge, Confirm, ContextMenu, Drawer, Empty, SkeletonList, Spinner, toast, useIsMobile } from '../ui/primitives.jsx';
 import { api, loadAccounts, forgetAccount, getDraft, messagePreviewText, normalizeFavorites, normalizeNotifications, toggleFavorite } from '../lib/api.js';
 import { relTime } from '../lib/format.js';
-import ChatTab from './chat/ChatTab.jsx';
-import ContactsTab from './contacts/ContactsTab.jsx';
-import DiscoverTab from './discover/DiscoverTab.jsx';
-import Settings from './Settings.jsx';
-import AdminPage from './admin/AdminPage.jsx';
+
+const ChatTab = lazy(() => import('./chat/ChatTab.jsx'));
+const ContactsTab = lazy(() => import('./contacts/ContactsTab.jsx'));
+const DiscoverTab = lazy(() => import('./discover/DiscoverTab.jsx'));
+const Settings = lazy(() => import('./Settings.jsx'));
+const AdminPage = lazy(() => import('./admin/AdminPage.jsx'));
 
 /* 广场是首页：打开就看见有哪些 Bot，再进消息 */
 /* 侧栏顺序参照主流桌面端：消息 → 联系人 → 广场 → 收藏 → 我的，收藏是新增的独立入口 */
@@ -381,53 +382,55 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
       </aside>
 
       <main className="app-main">
-        {tab === 'chat' ? (
-          <ChatTab
-            token={token}
-            me={meLive}
-            conversations={convs}
-            refreshConversations={refreshConversations}
-            openConvId={openConv?.id}
-            openMsgId={openConv?.messageId}
-            onConsumedOpen={() => setOpenConv(null)}
-            onGoTab={setTab}
-            newChatSignal={newChatSignal}
-            onOpenNotifications={openNotifications}
-            notifCount={notifs.count}
-          />
-        ) : null}
-        {tab === 'contacts' ? (
-          <ContactsTab token={token} me={meLive} conversations={convs} onOpenConversation={openConversation} refreshConversations={refreshConversations} notifications={notifs} onOpenNotifications={openNotifications} />
-        ) : null}
-        {tab === 'plaza' ? (
-          <DiscoverTab
-            token={token}
-            me={meLive}
-            initialView={discoverView}
-            onBotSession={onBotSession}
-            onOpenConversation={openConversation}
-            onGoTab={setTab}
-          />
-        ) : null}
-        {tab === 'me' ? (
-          <Settings
-            token={token}
-            me={meLive}
-            theme={theme}
-            onTheme={onTheme}
-            font={font}
-            onFont={onFont}
-            onOpenNotifications={openNotifications}
-            onOpenFavorites={openFavorites}
-            notifCount={notifs.count}
-            onSwitchAccount={() => setAccountOpen(true)}
-            onAddAccount={onAddAccount}
-            onLogout={onLogout}
-            onMeChange={setMeLive}
-            onGoTab={setTab}
-          />
-        ) : null}
-        {tab === 'admin' && meLive?.is_admin ? <AdminPage token={token} me={meLive} /> : null}
+        <Suspense fallback={<div className="fe-route-state" role="status"><Spinner size={18} /> 正在打开页面</div>}>
+          {tab === 'chat' ? (
+            <ChatTab
+              token={token}
+              me={meLive}
+              conversations={convs}
+              refreshConversations={refreshConversations}
+              openConvId={openConv?.id}
+              openMsgId={openConv?.messageId}
+              onConsumedOpen={() => setOpenConv(null)}
+              onGoTab={setTab}
+              newChatSignal={newChatSignal}
+              onOpenNotifications={openNotifications}
+              notifCount={notifs.count}
+            />
+          ) : null}
+          {tab === 'contacts' ? (
+            <ContactsTab token={token} me={meLive} conversations={convs} onOpenConversation={openConversation} refreshConversations={refreshConversations} notifications={notifs} onOpenNotifications={openNotifications} />
+          ) : null}
+          {tab === 'plaza' ? (
+            <DiscoverTab
+              token={token}
+              me={meLive}
+              initialView={discoverView}
+              onBotSession={onBotSession}
+              onOpenConversation={openConversation}
+              onGoTab={setTab}
+            />
+          ) : null}
+          {tab === 'me' ? (
+            <Settings
+              token={token}
+              me={meLive}
+              theme={theme}
+              onTheme={onTheme}
+              font={font}
+              onFont={onFont}
+              onOpenNotifications={openNotifications}
+              onOpenFavorites={openFavorites}
+              notifCount={notifs.count}
+              onSwitchAccount={() => setAccountOpen(true)}
+              onAddAccount={onAddAccount}
+              onLogout={onLogout}
+              onMeChange={setMeLive}
+              onGoTab={setTab}
+            />
+          ) : null}
+          {tab === 'admin' && meLive?.is_admin ? <AdminPage token={token} me={meLive} /> : null}
+        </Suspense>
       </main>
 
       {isMobile ? (

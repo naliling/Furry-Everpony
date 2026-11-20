@@ -211,12 +211,12 @@
   gap: 10px;
   padding: 0 2px;
   border-radius: var(--radius-md);
-  animation: fe-msg-in 220ms var(--ease) both;
+  animation: fe-msg-in var(--motion-feedback) var(--motion-ease);
 }
 @keyframes fe-msg-in {
   from {
-    opacity: 0;
-    transform: translateY(6px);
+    opacity: .38;
+    transform: translateY(4px);
   }
 }
 .msg-mine {
@@ -918,24 +918,16 @@
   inset: 0;
   border-radius: 50%;
   border: 1px solid rgba(91, 140, 255, 0.16);
-  animation: fe-orbit 16s linear infinite;
 }
 .chat-welcome-orb span:nth-child(2) {
   inset: 18%;
   border-color: rgba(167, 123, 255, 0.18);
-  animation-duration: 22s;
-  animation-direction: reverse;
 }
 .chat-welcome-orb span:nth-child(3) {
   inset: 36%;
   border-color: rgba(75, 225, 255, 0.14);
-  animation-duration: 28s;
 }
-@keyframes fe-orbit {
-  to {
-    transform: rotate(360deg);
-  }
-}
+@keyframes fe-orbit { to { transform: rotate(360deg); } }
 .chat-welcome-icon {
   position: relative;
   color: var(--brand);
@@ -1447,7 +1439,6 @@
   background: rgba(2, 4, 10, 0.92);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
-  animation: fe-fade 180ms var(--ease);
   user-select: none;
 }
 .imgviewer-top {
@@ -1504,8 +1495,12 @@
   max-height: none;
   border-radius: 10px;
   box-shadow: 0 30px 90px -30px rgba(0, 0, 0, 0.9);
-  transition: transform 120ms var(--ease);
-  will-change: transform;
+  transition: transform 160ms var(--motion-ease);
+  animation: fe-fade var(--motion-feedback) var(--motion-ease);
+}
+@media (prefers-reduced-motion: reduce) {
+  .imgviewer-stage img { transition: none; animation: none; }
+  .msg { animation: none; }
 }
 .imgviewer-nav {
   position: absolute;

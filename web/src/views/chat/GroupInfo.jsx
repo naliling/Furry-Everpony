@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
-import { Drawer, Avatar, Empty, Spinner, Toggle, Confirm, Modal, ContextMenu, toast, Tabs, useIsMobile } from '../../ui/primitives.jsx';
+import { Drawer, Avatar, Empty, Spinner, Toggle, Confirm, Modal, OverlayDismissButton, ContextMenu, toast, Tabs, useIsMobile } from '../../ui/primitives.jsx';
 import { api, uploadFile, mediaUrl } from '../../lib/api.js';
 import { fmtDate, fmtSize, relTime, roleLabel } from '../../lib/format.js';
 import { AnnouncementModal, GroupInviteModal } from '../shared/Dialogs.jsx';
@@ -394,7 +394,7 @@ export default function GroupInfo({ token, me, group, onClose, onChanged, onMemb
         </div>
 
         <div className="group-foot">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>关闭</button>
+          <OverlayDismissButton className="btn btn-ghost">关闭</OverlayDismissButton>
         </div>
       </div>
 
@@ -408,7 +408,7 @@ export default function GroupInfo({ token, me, group, onClose, onChanged, onMemb
             ))}
           </div>
           <div className="modal-foot">
-            <button type="button" className="btn btn-ghost" onClick={() => setMuteTarget(null)}>取消</button>
+            <OverlayDismissButton className="btn btn-ghost">取消</OverlayDismissButton>
             <button type="button" className="btn btn-primary" onClick={doMute} disabled={!!busy}>确定禁言</button>
           </div>
         </Modal>

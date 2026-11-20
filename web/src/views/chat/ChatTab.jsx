@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../../ui/icons.jsx';
-import { Avatar, Badge, ContextMenu, Empty, Modal, Spinner, toast, useIsMobile, useLongPress, useSwipeBack, Spinner as Spin } from '../../ui/primitives.jsx';
+import { Avatar, Badge, ContextMenu, Empty, Modal, OverlayDismissButton, prefersReducedMotion, Spinner, toast, useIsMobile, useLongPress, useOpacityExit, useSwipeBack, Spinner as Spin } from '../../ui/primitives.jsx';
 import { api } from '../../lib/api.js';
 import { previewFor, relTime, statusMeta } from '../../lib/format.js';
 import ChatPanel from './ChatPanel.jsx';
@@ -9,6 +9,12 @@ import { AddFriendModal, CreateGroupModal, JoinGroupModal } from '../shared/Dial
 export default function ChatTab({ token, me, conversations, refreshConversations, openConvId, openMsgId, onConsumedOpen, onGoTab, newChatSignal, onOpenNotifications, notifCount = 0 }) {
   const isMobile = useIsMobile();
   const [activeId, setActiveId] = useState(null);
+  const [leavingId, setLeavingId] = useState(null);
+  const chatColumn = useRef(null);
+  const activate = useCallback((id) => {
+    setLeavingId(null);
+    setActiveId(id);
+  }, []);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [menu, setMenu] = useState(null);
@@ -59,22 +65,26 @@ export default function ChatTab({ token, me, conversations, refreshConversations
 
   useEffect(() => {
     if (openConvId) {
-      setActiveId(openConvId);
+      activate(openConvId);
       onConsumedOpen?.();
     }
-  }, [openConvId, onConsumedOpen]);
+  }, [activate, openConvId, onConsumedOpen]);
 
   useEffect(() => {
     if (newChatSignal > 0) setNewChat(true);
   }, [newChatSignal]);
 
-  const activeConv = (conversations || []).find((c) => c.id === activeId) || (lastConv?.id === activeId ? lastConv : null);
+  const leaving = isMobile && leavingId !== null && activeId === null;
+  const displayedId = activeId ?? (leaving ? leavingId : null);
+  const activeConv = (conversations || []).find((c) => c.id === displayedId) || (lastConv?.id === displayedId ? lastConv : null);
+  useOpacityExit(chatColumn, leaving, () => setLeavingId(null));
+  useEffect(() => { if (!isMobile) setLeavingId(null); }, [isMobile]);
 
-  const openConv = (c) => {
-    setActiveId(c.id);
+  const openConv = (c) => activate(c.id);
+  const back = () => {
+    if (isMobile && activeId !== null && !prefersReducedMotion()) setLeavingId(activeId);
+    setActiveId(null);
   };
-
-  const back = () => setActiveId(null);
   const swipe = useSwipeBack(isMobile && !!activeId, back);
 
   const convMenu = (e, conv) => {
@@ -120,7 +130,7 @@ export default function ChatTab({ token, me, conversations, refreshConversations
     try {
       const data = await api('/api/dm', { method: 'POST', token, body: { number } });
       await refreshConversations?.();
-      setActiveId(data.conversationId);
+      activate(data.conversationId);
       setNewChat(false);
     } catch (err) {
       toast(err.message, 'error');
@@ -129,7 +139,7 @@ export default function ChatTab({ token, me, conversations, refreshConversations
 
   const afterCreateGroup = async (data) => {
     await refreshConversations?.();
-    if (data?.conversationId) setActiveId(data.conversationId);
+    if (data?.conversationId) activate(data.conversationId);
   };
 
   const afterJoinGroup = async () => {
@@ -140,7 +150,7 @@ export default function ChatTab({ token, me, conversations, refreshConversations
 
   return (
     <div className="chat-tab">
-      <div className={'conv-column' + (isMobile && activeId ? ' conv-hidden-mobile' : '')}>
+      <div className={'conv-column' + (isMobile && activeId ? ' conv-hidden-mobile' : '')} inert={isMobile && !!activeId}>
         <header className="conv-head">
           <div className="conv-title">
             <h2>消息</h2>
@@ -232,8 +242,10 @@ export default function ChatTab({ token, me, conversations, refreshConversations
       </div>
 
       <div
-        className={'chat-column' + (isMobile && !activeId ? ' chat-hidden-mobile' : '')}
-        style={isMobile && activeId ? { transform: 'translateX(' + swipe.offset + 'px)' } : undefined}
+        ref={chatColumn}
+        className={'chat-column' + (isMobile && activeId ? ' chat-visible-mobile' : '') + (leaving ? ' chat-leaving-mobile' : '')}
+        style={isMobile && activeId && swipe.offset > 0 ? { '--chat-swipe-transform': 'translateX(' + swipe.offset + 'px)' } : undefined}
+        inert={isMobile && !activeId}
         {...(isMobile && activeId ? swipe.handlers : {})}
       >
         {activeConv ? (
@@ -244,8 +256,8 @@ export default function ChatTab({ token, me, conversations, refreshConversations
             conversations={conversations}
             onBack={back}
             onActivity={() => refreshConversations?.()}
-            onConversationGone={() => { setActiveId(null); refreshConversations?.(); }}
-            onOpenConversation={(id) => setActiveId(id)}
+            onConversationGone={() => { if (!leaving) back(); refreshConversations?.(); }}
+            onOpenConversation={activate}
             focusMessageId={openMsgId}
             onTypingChange={onTypingChange}
           />
@@ -298,7 +310,7 @@ function NewChatModal({ token, onClose, onCreate }) {
         <span className="field-hint">可以直接和任意号码聊天的前提是对方允许；也可以先加好友。</span>
       </label>
       <div className="modal-foot">
-        <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
+        <OverlayDismissButton className="btn btn-ghost">取消</OverlayDismissButton>
         <button type="button" className="btn btn-primary" disabled={!valid || busy} onClick={submit}>
           {busy ? <Spinner size={15} /> : <Icon name="chat" size={16} />} 开始聊天
         </button>
