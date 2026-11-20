@@ -1,3 +1,14 @@
+# v2026.11.20.0.10.41 — 2026-11-20
+
+## 桌面一键启动 + 固定地址可靠性加固
+
+- **弹窗显示固定地址**：桌面「Everony 服务开关」和开机自启脚本的状态弹窗，优先读 `data/funnel.json` 的固定地址（`https://ponynaliling.tail31c195.ts.net/`），不再显示会变的临时地址。
+- **启动幂等确保 Funnel**：一键启动/开机自启时调用 `Ensure-Funnel`——Tailscale 已登录就 `funnel --bg 7788` 幂等重建，万一 Funnel 配置丢了会自动恢复；没登录则跳过，不阻塞本地服务。
+- **修 PowerShell 中文乱码**：`everony.ps1` 补 UTF-8 BOM，解决 PowerShell 5.1 把无 BOM 的 UTF-8 按 ANSI 解读导致中文字符串语法报错。
+- 实测 stop → start 全链路：本机服务 200、固定地址公网 200、桌面开关 status 正常返回版本，Funnel 仍绑定 `ponynaliling.tail31c195.ts.net`。
+- 固定地址原理：Tailscale Funnel 的 `*.ts.net` 名绑在 tailnet 节点（主机名 PONYnaliling）上，只要同一账号同一设备登录就不变；Funnel 配置持久化在 tailscaled 里，重启/重连后自动恢复。
+
+# v2026.11.20.0.10.40 — 2026-11-20
 # v2026.11.20.0.10.40 — 2026-11-20
 
 ## 固定公网地址：Tailscale Funnel 接入，网站永久可访问
@@ -13,20 +24,3 @@
 # v2026.11.18.0.10.39 — 2026-11-18
 
 ## 修好点开 Bot 崩溃：setStats is not defined
-
-- 根因：v0.10.35 删「发言排行」时删掉了 stats 的 useState 声明，但 BotDetail 的 useEffect 里还留着 `setStats(null)`，一点开任意 Bot 详情就抛 `setStats is not defined`、整页渲染失败（手机浏览器直接显示错误页）。
-- 修复：删掉这行残留调用；全项目扫过其它已删 state（invite/frame/stats）的残留引用，没有别的了。
-- 实测（CDP 390×844 手机）：点 Bot 卡片 → 资料卡正常弹出（标题「茉心·陌斯」）、无 error boundary、无 JS 报错；点关闭 150ms 弹窗仍在播 fe-overlay-out、800ms 才卸载。
-- 测试：p1 17/17、admin 24/24、captcha 13/13。
-
-# v2026.11.18.0.10.38 — 2026-11-18
-
-## 全站浮层动画统一：桌面手机同一套、侧栏也有动画
-
-- 根因：pages.css 手机断点里把 .overlay/.drawer/.modal 的 animation 设成 none，手机端浮层零动画；桌面端右键菜单 ContextMenu 从未接退出动画；侧栏切换无动画。
-- 修复：删掉手机端 animation:none；ContextMenu 接入 useOverlayClose（0.52s）；effects.css 追加全站统一动画——所有浮层开关 0.6s 淡入淡出（!important 强制），覆盖桌面/手机/浅色/深色主题；侧栏按钮与主内容切换也有 0.6s 过渡。
-- 实测（CDP 桌面）：点关闭后 150ms 弹窗仍在且 animation=fe-fade-out，850ms 才卸载，动画可见。
-
-# v2026.11.18.0.10.37 — 2026-11-18
-
-## 关闭动画 + 邮箱注册 + 手机 Bot 资料卡

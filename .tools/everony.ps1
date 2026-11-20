@@ -38,14 +38,28 @@ function Get-LanIp {
 }
 
 function Get-TunnelUrl {
-  try {
-    $f = Join-Path $Root 'data\tunnel.json'
-    if (Test-Path $f) {
-      $j = Get-Content $f -Raw | ConvertFrom-Json
-      if ($j.url) { return [string]$j.url }
-    }
-  } catch { }
+  # 固定地址优先（Tailscale Funnel，永久不变）；没有再退回 quick tunnel 临时地址
+  foreach ($name in @('data\funnel.json', 'data\tunnel.json')) {
+    try {
+      $f = Join-Path $Root $name
+      if (Test-Path $f) {
+        $j = Get-Content $f -Raw | ConvertFrom-Json
+        if ($j.url) { return [string]$j.url }
+      }
+    } catch { }
+  }
   return ''
+}
+
+function Ensure-Funnel {
+  # 每次启动幂等确保 Funnel 指向 7788：配置在就复用，丢了就自动重建，地址（绑在 tailnet 节点上）不变
+  try {
+    $ts = 'C:\Program Files\Tailscale\tailscale.exe'
+    if (-not (Test-Path $ts)) { return }
+    $st = & $ts status 2>$null
+    if ($st -match 'Logged out') { return }   # 没登录就跳过，不阻塞本地服务启动
+    & $ts funnel --bg 7788 2>$null | Out-Null
+  } catch { }
 }
 
 function Describe([object]$Health) {
@@ -94,6 +108,7 @@ try {
     Show-Popup ('正在启动，最多等十几秒…' + $NL + $NL + '启动完会自动打开网页') 'Everony' 3
     & $Node (Join-Path $Root '.tools\launch-server.mjs') | Out-Null
     & $Node (Join-Path $Root '.tools\launch-tunnel.mjs') | Out-Null
+    Ensure-Funnel
     for ($i = 0; $i -lt 40; $i++) {
       Start-Sleep -Milliseconds 400
       $health = Get-Health
