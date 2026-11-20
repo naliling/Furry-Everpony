@@ -10,6 +10,7 @@ import './layout.css';
 import './chat.css';
 import './pages.css';
 import './effects.css';
+import './motion-all.css';
 
 installBackHandler();
 

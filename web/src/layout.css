@@ -6,8 +6,8 @@
 
 .app-shell {
   display: flex;
-  height: 100dvh;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   position: relative;
 }
@@ -262,6 +262,8 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 18px 26px 30px;
   width: 100%;
   max-width: var(--page-max);
@@ -414,6 +416,8 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 2px 8px 14px;
   display: flex;
   flex-direction: column;

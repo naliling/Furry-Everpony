@@ -3403,10 +3403,10 @@ body,
 /* ================= 游客广场首页（未登录） ================= */
 .plaza-page {
   position: relative;
-  min-height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
   padding: 18px clamp(14px, 4vw, 46px) 34px;
-  overflow-y: auto;
   overflow-x: hidden;
   background: var(--bg-base);
 }

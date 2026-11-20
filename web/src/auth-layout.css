@@ -8,7 +8,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   /* 正常滚动和本地边缘回弹交给系统，不把手势传给浏览器导航。 */
-  overscroll-behavior-y: contain;
+  overscroll-behavior-y: auto;
   scroll-padding-block: 12px;
   -webkit-overflow-scrolling: touch;
   animation: none;

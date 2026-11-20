@@ -642,6 +642,11 @@ export default function AdminPage({ token, me }) {
               <label className="field">
                 <span className="field-label">授权码 / 应用专用密码</span>
                 <input className="input" type="password" autoComplete="new-password" disabled={smtp.clearPass} value={smtp.pass} placeholder={savedSmtp?.hasPass ? '已保存，留空保留' : '使用服务商提供的 SMTP 授权码'} onChange={(e) => updateSmtp({ pass: e.target.value })} />
+                {smtp.pass && /qq\.com/i.test(smtp.user) && !/^[A-Za-z]{16}$/.test(smtp.pass.trim()) ? (
+                  <span className="field-hint" style={{ color: 'var(--danger)', display: 'block', marginTop: 6 }}>
+                    QQ 邮箱授权码应为 16 位字母（你填的不是）。请在 QQ 邮箱 → 设置 → 账户 → SMTP 服务重新生成，别用 QQ 密码。
+                  </span>
+                ) : null}
               </label>
               <label className="field">
                 <span className="field-label">发件人地址</span>
