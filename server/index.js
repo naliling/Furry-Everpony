@@ -52,7 +52,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.21.0.10.49';
+const VERSION = '2026.11.21.0.10.50';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -2695,15 +2695,19 @@ app.get('/api/captcha', async (req, reply) => {
     const isGroup = conv?.kind === 'group';
     const group = isGroup ? convGroup(convId) : null;
 
-    const rows = db
-      .prepare(
-        `SELECT m.id, m.sender_id, m.body, m.kind, m.recalled, m.created_at, m.reply_to_id, m.meta,
+    /* latest=1：一次取最近 limit 条并反转成时间正序，避免前端为拿历史串行翻多页。 */
+    const latest = req.query.latest === '1';
+    const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 400);
+    const baseSql = `SELECT m.id, m.sender_id, m.body, m.kind, m.recalled, m.created_at, m.reply_to_id, m.meta,
                 a.number AS sender_number, a.nickname AS sender_nickname, a.avatar AS sender_avatar
            FROM messages m JOIN accounts a ON a.id = m.sender_id
-          WHERE m.conversation_id = ? AND m.id > ?
-          ORDER BY m.id ASC LIMIT 200`,
-      )
-      .all(convId, after);
+          WHERE m.conversation_id = ? AND m.id > ?`;
+    let rows;
+    if (latest) {
+      rows = db.prepare(baseSql + ' ORDER BY m.id DESC LIMIT ' + limit).all(convId, after).reverse();
+    } else {
+      rows = db.prepare(baseSql + ' ORDER BY m.id ASC LIMIT 200').all(convId, after);
+    }
 
     return {
       messages: serializeMessages(rows, me.id, {

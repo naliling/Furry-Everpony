@@ -122,16 +122,9 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
     setMessages([]);
     lastIdRef.current = 0;
     try {
-      let collected = [];
-      let after = 0;
-      for (let i = 0; i < 6; i += 1) {
-        const data = await api('/api/conversations/' + convId + '/messages?after=' + after, { token });
-        const page = data.messages || [];
-        collected = collected.concat(page);
-        if (page.length < 200) break;
-        after = page[page.length - 1].id;
-      }
-      if (collected.length > 400) collected = collected.slice(-400);
+      // 一次请求取最近 400 条；慢链路上不再串行翻页（原来最多 6 趟往返导致转圈十几秒）。
+      const data = await api('/api/conversations/' + convId + '/messages?after=0&latest=1&limit=400', { token, timeoutMs: 15000 });
+      const collected = (data.messages || []).slice(-400);
       setMessages(collected);
       lastIdRef.current = collected.length ? collected[collected.length - 1].id : 0;
       initialLenRef.current = collected.length;
@@ -173,7 +166,7 @@ export default function ChatPanel({ token, me, conversation, conversations = [],
   const poll = useCallback(async () => {
     if (!convId) return;
     try {
-      const data = await api('/api/conversations/' + convId + '/messages?after=' + lastIdRef.current, { token });
+      const data = await api('/api/conversations/' + convId + '/messages?after=' + lastIdRef.current, { token, silent: true, timeoutMs: 12000 });
       const incoming = data.messages || [];
       if (incoming.length) {
         const first = incoming[0];
