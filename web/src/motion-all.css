@@ -6,9 +6,22 @@
    ============================================================ */
 :root {
   --m-ease: cubic-bezier(.22,.61,.36,1);
-  --m-fast: 180ms;
-  --m-mid: 320ms;
+  --m-fast: 500ms;
+  --m-mid: 560ms;
   --m-slow: 620ms;
+}
+
+/* 全局兜底：任何动画/过渡最短 0.5 秒，避免切页一瞬间晃眼。
+   只影响时长，不碰 animation-delay（错落进场需要保留）。 */
+*, *::before, *::after {
+  transition-duration: 500ms !important;
+  animation-duration: 500ms !important;
+}
+/* 进场/退场类统一不短于 0.5 秒 */
+.plaza-page, .app-main > *, .conv-item, .bot-card,
+.motion-layer, .motion-layer > .motion-surface, .toast.motion-layer {
+  animation-duration: 620ms !important;
+  transition-duration: 620ms !important;
 }
 
 /* ---------- 1. 所有可点击元素：统一过渡 + 按压反馈 ---------- */
@@ -170,6 +183,18 @@ select:focus,
 .settings-card,
 .admin-card {
   animation: m-rise var(--m-mid) var(--m-ease) both;
+}
+
+/* ---------- 3.5 页面切换：淡出 + 淡入对称（有头有尾） ---------- */
+@keyframes m-page-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes m-page-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root) {
+    animation: m-page-out 620ms var(--m-ease) both !important;
+  }
+  ::view-transition-new(root) {
+    animation: m-page-in 620ms var(--m-ease) both !important;
+  }
 }
 
 /* ---------- 4. 减少动画：全部关掉 ---------- */

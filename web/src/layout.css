@@ -38,21 +38,13 @@
   place-items: center;
   border: 0;
   padding: 0;
-  cursor: pointer;
+  cursor: default;
   border-radius: 14px;
   color: #fff;
   background: var(--grad-brand);
   box-shadow: var(--glow-brand);
   margin-bottom: 6px;
   flex: none;
-  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
-}
-.rail-logo:hover {
-  transform: translateY(-1px) scale(1.03);
-  box-shadow: 0 0 0 1px rgba(140, 170, 255, 0.45), 0 14px 30px -12px rgba(91, 140, 255, 0.95);
-}
-.rail-logo:active {
-  transform: scale(0.97);
 }
 .rail-logo-glow {
   position: absolute;

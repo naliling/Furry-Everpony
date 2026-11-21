@@ -63,11 +63,11 @@
   --rail-w: 78px;
   --list-w: 318px;
   --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
-  --dur: 180ms;
+  --dur: 520ms;
   --motion-page: 620ms;
-  --motion-overlay: 600ms;
-  --motion-menu: 520ms;
-  --motion-feedback: 220ms;
+  --motion-overlay: 620ms;
+  --motion-menu: 560ms;
+  --motion-feedback: 500ms;
   --motion-ease: cubic-bezier(.22, .61, .36, 1);
 }
 

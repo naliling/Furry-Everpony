@@ -172,13 +172,24 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
     return () => window.removeEventListener('fe:open-settings', onOpenSettings);
   }, []);
 
+  /* 页面切换用浏览器原生视图过渡：旧页淡出、新页淡入，各 0.62 秒，有头有尾。 */
+  const switchTab = useCallback((id) => {
+    const change = () => setTab(id);
+    if (typeof document !== 'undefined' && typeof document.startViewTransition === 'function'
+        && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      document.startViewTransition(change);
+    } else {
+      change();
+    }
+  }, []);
+
   const openConversation = (id, messageId) => {
-    setTab('chat');
+    switchTab('chat');
     setOpenConv(messageId ? { id, messageId } : { id });
   };
 
   const goTab = (id) => {
-    setTab(id);
+    switchTab(id);
     if (id === 'chat') setNewChatSignal((n) => n + 0);
   };
 
@@ -310,16 +321,14 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
   return (
     <div className={'app-shell' + (isMobile ? ' is-mobile' : '')}>
       <aside className="rail" aria-label="主导航">
-        <button
-          type="button"
+        <div
           className="rail-logo"
           title="Everony"
-          aria-label="Everony 首页"
-          onClick={() => { setDiscoverView('plaza'); setTab('plaza'); }}
+          aria-hidden="true"
         >
           <RailIcon name="logo" size={24} />
           <span className="rail-logo-glow" aria-hidden />
-        </button>
+        </div>
         <nav className="rail-nav">
           <div className="rail-group">
             {navItems.map((item) => (

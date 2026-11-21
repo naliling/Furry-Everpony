@@ -52,7 +52,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.21.0.10.45';
+const VERSION = '2026.11.21.0.10.46';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
