@@ -147,6 +147,8 @@ async function isolatedApi(t) {
   const patch = (token, fields) => request('PATCH', '/api/admin/site', fields, token);
   const setup = (token, smtp, secure = true) => patch(token, {
     smtpHost: '127.0.0.1', smtpPort: smtp.port, smtpSecure: secure, smtpUser: syntheticSender, smtpPass: syntheticAuthorization,
+    // 这些用例测的是发码流程，显式启用邮箱门禁（产品默认已改为 none）。
+    registerGate: 'email',
   });
   return { db, request, register, bootstrap, patch, setup, warnings };
 }
@@ -161,7 +163,7 @@ const extractCode = (smtp) => {
   return code;
 };
 
-test('空库兼容首位站长；未配置时公开状态不冒充就绪且不降邮箱门禁', async (t) => {
+test('空库兼容首位站长；未配置时公开状态不冒充就绪', async (t) => {
   const f = await isolatedApi(t);
   const site = () => f.request('GET', '/api/site');
   let res = await site();
@@ -172,11 +174,14 @@ test('空库兼容首位站长；未配置时公开状态不冒充就绪且不�
   statusCode(await f.request('POST', '/api/email-code', { email: syntheticRecipient }), 403, 'EMAIL_GATE_DISABLED');
   const admin = await f.bootstrap();
   res = await site();
-  assert.equal(res.json().registerGate, 'email');
+  // 产品默认已改为 none（发信在本机不可用），注册只需图形码。
+  assert.equal(res.json().registerGate, 'none');
   assert.equal(res.json().registerBootstrap, false);
   assert.equal(res.json().smtpReady, false);
   assert.equal(res.json().emailCodeAvailable, false);
-  assert.match(res.json().emailCodeUnavailableReason, /管理员/);
+  // 默认 none 门禁：邮箱码不可用，但注册不依赖它。
+  assert.ok(typeof res.json().emailCodeUnavailableReason === 'string' && res.json().emailCodeUnavailableReason.length > 0);
+  statusCode(await f.patch(admin, { registerGate: 'email' }), 200);
   statusCode(await f.request('POST', '/api/email-code', { email: syntheticRecipient }), 503, 'SMTP_UNAVAILABLE');
   statusCode(await f.register(syntheticRecipient, { invite: 'ONLYINVITE' }), 503, 'SMTP_UNAVAILABLE');
   statusCode(await f.request('POST', '/api/admin/site/test-mail', { to: syntheticRecipient }, admin), 503, 'SMTP_HOST_REQUIRED');

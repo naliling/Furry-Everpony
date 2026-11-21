@@ -11,17 +11,22 @@
   --m-slow: 620ms;
 }
 
-/* 全局兜底：任何动画/过渡最短 0.5 秒，避免切页一瞬间晃眼。
-   只影响时长，不碰 animation-delay（错落进场需要保留）。 */
+/* 兜底：交互过渡最短 0.5 秒，避免切页一瞬间晃眼。
+   注意：不碰所有元素的 animation-duration —— 那会把 logo 漂浮/光环呼吸/
+   轨道旋转这类循环装饰动画也压成 0.5 秒，导致图标疯狂摆动。
+   进场/退场类单独在下面限定。 */
 *, *::before, *::after {
   transition-duration: 500ms !important;
-  animation-duration: 500ms !important;
 }
-/* 进场/退场类统一不短于 0.5 秒 */
 .plaza-page, .app-main > *, .conv-item, .bot-card,
 .motion-layer, .motion-layer > .motion-surface, .toast.motion-layer {
   animation-duration: 620ms !important;
-  transition-duration: 620ms !important;
+}
+/* 循环装饰动画恢复其原生节奏，不被兜底覆盖 */
+.auth-logo-img, .auth-logo-halo, .auth-orbit .ring,
+.fe-avatar-orbit, [class*='ring'], .typing-dots i,
+.conv-typing-dots i, .fe-shimmer, .qr-scan-line {
+  animation-duration: revert-layer !important;
 }
 
 /* ---------- 1. 所有可点击元素：统一过渡 + 按压反馈 ---------- */
@@ -172,6 +177,32 @@ select:focus,
 .plaza-list-wrap .Empty,
 .plaza-list-wrap .empty-state { animation: m-rise var(--m-slow) var(--m-ease) both !important; }
 .input-clear { animation: m-pop var(--m-fast) var(--m-ease) both !important; }
+
+/* ---------- 2.5 登录/注册页：每个元素进场 + 按钮反馈 ---------- */
+.auth-wrap, .auth-screen { animation: m-fade var(--m-slow) var(--m-ease) both !important; }
+.auth-hero, .auth-logo-stage, .auth-brand-logo { animation: m-rise var(--m-slow) var(--m-ease) both !important; }
+.auth-logo-stage { animation-delay: 80ms !important; }
+.auth-card { animation: m-rise var(--m-slow) var(--m-ease) both !important; animation-delay: 120ms !important; }
+.auth-card-top, .auth-tabs, .auth-tab-glider { animation: m-rise var(--m-mid) var(--m-ease) both !important; animation-delay: 180ms !important; }
+.auth-mode-form, .auth-submit, .auth-email-action { animation: m-rise var(--m-mid) var(--m-ease) both !important; animation-delay: 240ms !important; }
+.auth-field, .field { animation: m-rise var(--m-mid) var(--m-ease) both !important; }
+.field:nth-child(1) { animation-delay: 280ms !important; }
+.field:nth-child(2) { animation-delay: 330ms !important; }
+.field:nth-child(3) { animation-delay: 380ms !important; }
+.field:nth-child(n+4) { animation-delay: 420ms !important; }
+/* 登录/注册按钮：按压回弹 + 悬停抬升 + 发光（×0.5s 起步） */
+.auth-submit, .auth-email-action, .auth-tabs button, .auth-back-inline {
+  transition: transform var(--m-mid) var(--m-ease), box-shadow var(--m-mid) var(--m-ease),
+              background-color var(--m-mid) var(--m-ease), filter var(--m-mid) var(--m-ease) !important;
+}
+.auth-submit:hover, .auth-email-action:hover, .auth-tabs button:hover {
+  transform: translateY(-2px) !important;
+  filter: brightness(1.07) !important;
+  box-shadow: 0 12px 28px -10px rgba(91,140,255,.9) !important;
+}
+.auth-submit:active, .auth-email-action:active, .auth-tabs button:active {
+  transform: scale(.96) !important;
+}
 
 /* ---------- 3. 全站通用进场：任何页面切换、列表项 ---------- */
 .app-main > *,

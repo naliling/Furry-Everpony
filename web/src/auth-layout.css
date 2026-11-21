@@ -180,8 +180,19 @@
 }
 
 @media (max-width: 779px) {
-  .auth-screen .auth-scroll-layout { --auth-gutter: 12px; }
-  .auth-screen .auth-card { padding: clamp(12px, 4vw, 18px); }
+  .auth-screen .auth-scroll-layout {
+    --auth-gutter: 12px;
+    /* 竖屏：顶对齐 + 底部预留导航与安全区，避免内容居中时被顶出可视区造成错位 */
+    align-content: start;
+    align-items: start;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+  .auth-screen .auth-card {
+    padding: clamp(12px, 4vw, 18px);
+    inline-size: 100%;
+    max-inline-size: 520px;
+    margin-inline: auto;
+  }
 }
 
 @media (max-width: 779px), (pointer: coarse) {

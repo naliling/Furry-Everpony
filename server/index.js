@@ -52,7 +52,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.21.0.10.46';
+const VERSION = '2026.11.21.0.10.47';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -411,8 +411,10 @@ export function buildServer({ db = openDb(), uploadDir, webDir = WEB_DIR, log: i
 
   /* 注册门禁：both 邮箱码或邀请码都行 / invite 只认邀请码 / email 只认邮箱码 / none 只图形码 */
   const registerGate = () => {
-    const g = getSetting('registerGate', 'email');
-    return ['none', 'invite', 'email', 'both'].includes(g) ? g : 'email';
+    // 邮箱发信在本机不可用（授权码非 QQ 16 位标准，实测 535 被拒），
+    // 默认关闭邮箱门禁：注册只需图形验证码，避免别人卡在收不到验证码上。
+    const g = getSetting('registerGate', 'none');
+    return ['none', 'invite', 'email', 'both'].includes(g) ? g : 'none';
   };
 
   const smtpConfig = () => readMailConfig(getSetting);
