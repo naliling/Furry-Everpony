@@ -7,6 +7,10 @@ export const ACCOUNTS_KEY = 'fe_accounts';
 const netSubs = new Set();
 let netState = { offline: false, recovering: false, reason: '', at: 0 };
 let netRecoverTimer = null;
+/* 弱网/境外链路上单次超时很常见，不能一次失败就弹「连接已断开」。
+   只有连续多次真实失败才认定断网，成功一次立即清零。 */
+let netFailStreak = 0;
+const NET_FAIL_THRESHOLD = 3;
 
 function emitNet() {
   netSubs.forEach((fn) => {
@@ -26,6 +30,9 @@ export function netIsOffline() {
 }
 
 function netFail(reason) {
+  netFailStreak += 1;
+  // 单次/偶发失败不弹横幅；累积到阈值才提示真正断网。
+  if (netFailStreak < NET_FAIL_THRESHOLD && !netState.offline) return;
   if (netRecoverTimer) { window.clearTimeout(netRecoverTimer); netRecoverTimer = null; }
   if (netState.offline && netState.reason === reason) return;
   netState = { offline: true, recovering: false, reason: reason || '网络连接失败', at: Date.now() };
@@ -33,6 +40,7 @@ function netFail(reason) {
 }
 
 function netOk() {
+  netFailStreak = 0; // 任一请求成功就清零连续失败计数
   if (!netState.offline) return;
   /* 恢复后先显示 2 秒「已恢复」，再自动收起，给用户一个明确反馈 */
   netState = { offline: false, recovering: true, reason: '', at: Date.now() };
