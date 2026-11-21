@@ -52,7 +52,7 @@ const UPLOAD_MIME = {
 
 const PORT = Number(process.env.FE_PORT || 7788);
 const HOST = process.env.FE_HOST || '127.0.0.1';
-const VERSION = '2026.11.21.0.10.51';
+const VERSION = '2026.11.21.0.10.52';
 
 const NUMBER_RE = /^[1-9]\d{7,10}$/;
 const numberSchema = z.string().regex(NUMBER_RE, '号码必须是 8–11 位数字，且不能以 0 开头');
@@ -1530,15 +1530,24 @@ app.get('/api/captcha', async (req, reply) => {
   });
 
   /* ---------- 站点公开信息：不含 SMTP 主机、账号或密码 ---------- */
-  app.get('/api/site', async (_req, reply) => {
+  app.get('/api/site', async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     const mode = registerMode();
     const gate = registerGate();
     const bootstrap = registerBootstrap();
     const smtpReady = describeMailConfig(smtpConfig()).ready;
     const noEmail = emailGateProblem(mode, gate, bootstrap);
+    /* 附带一个初始验证码：注册页一次请求就能拿到设置+验证码，弱网少一次往返。 */
+    let captchaSeed = null;
+    if (hitAllowed(captchaHits, req.ip || 'local', 40, 10 * 60 * 1000)) {
+      const seedCode = randomCode();
+      const seedId = randomBytes(12).toString('hex');
+      captchaStore.set(seedId, { code: seedCode, expires: Date.now() + CAPTCHA_TTL_MS, tries: 0 });
+      captchaSeed = { id: seedId, svg: captchaSvg(seedCode), expiresIn: Math.round(CAPTCHA_TTL_MS / 1000) };
+    }
     return {
       version: VERSION,
+      captchaSeed,
       siteName: getSetting('siteName', 'Everony'),
       registerMode: mode,
       registerGate: gate,

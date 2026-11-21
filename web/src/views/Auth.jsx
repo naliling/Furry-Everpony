@@ -48,12 +48,18 @@ function useRegistrationResource(path, validate, enabled) {
     const { signal } = controller;
     const run = async () => {
       if (signal.aborted) return;
-      try {
-        const data = await api(path, { signal, timeoutMs: 10000 });
-        if (!validate(data)) throw new Error('服务器没有返回有效内容');
-        if (!signal.aborted) setResource({ data, error: '' });
-      } catch (err) {
-        if (!signal.aborted) setResource({ data: null, error: err.message });
+      // 弱网下多试几次；单次超时不再直接把注册卡死。
+      for (let attempt = 0; attempt < 3 && !signal.aborted; attempt += 1) {
+        try {
+          const data = await api(path, { signal, timeoutMs: 20000, silent: true });
+          if (!validate(data)) throw new Error('服务器没有返回有效内容');
+          if (!signal.aborted) setResource({ data, error: '' });
+          return;
+        } catch (err) {
+          if (signal.aborted) return;
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+          else setResource({ data: null, error: err.message });
+        }
       }
     };
     queueMicrotask(run);
@@ -109,11 +115,14 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont, initialMo
   const scrollerRef = useRef(null);
   const [siteResource, reloadSite] = useRegistrationResource('/api/site', validSite, registering);
   const [captchaResource, reloadCaptcha] = useRegistrationResource('/api/captcha', validCaptcha, registering);
-  const site = siteResource.data;
-  const captcha = captchaResource.data;
-  const bootstrap = site?.registerBootstrap === true;
-  const gate = bootstrap ? 'none' : site?.registerGate;
-  const closed = site?.registerMode === 'closed' && !bootstrap;
+  // 站点设置即使没读到，也不能卡死注册：服务端默认就是「仅图形码」门禁。
+  const site = siteResource.data || { registerGate: 'none', registerMode: 'open', registerBootstrap: false, smtpReady: false, emailCodeAvailable: false };
+  const siteLoaded = !!siteResource.data;
+  // 优先用 /api/site 一并返回的验证码种子，省一次请求；没有再用单独的 /api/captcha。
+  const captcha = captchaResource.data || site.captchaSeed || null;
+  const bootstrap = site.registerBootstrap === true;
+  const gate = bootstrap ? 'none' : site.registerGate;
+  const closed = site.registerMode === 'closed' && !bootstrap;
   const allowEmail = gate === 'email' || gate === 'both';
   const allowInvite = gate === 'invite' || gate === 'both';
   const canSendEmail = !closed && (site?.emailCodeAvailable ?? site?.smtpReady) === true;
@@ -243,7 +252,8 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont, initialMo
       return;
     }
 
-    if (!site || closed || !captcha) return;
+    if (closed) { setError({ message: '本站已关闭注册' }); return; }
+    if (!captcha) { setError({ message: '图片验证码还没加载好，点验证码图片重试' }); return; }
     const mail = email.trim();
     if (!EMAIL.test(mail)) return reportFieldError('auth-email', '请输入有效的邮箱');
     if (!NUMBER.test(number)) return reportFieldError('auth-number', '号码是 8–11 位数字，不能以 0 开头');
@@ -579,13 +589,8 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont, initialMo
                         onChange={(event) => { setInvite(event.target.value); clearFieldError('auth-invite'); }}
                       />
                     ) : null}
-                    {!site && siteResource.error ? (
-                      <div className="auth-resource-error">
-                        <p className="auth-field-error" role="alert">注册设置未加载：{siteResource.error}</p>
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={reloadSite}>重试</button>
-                      </div>
-                    ) : !site ? (
-                      <p className="auth-gate-note" role="status">正在读取注册设置，你可以先填写表单。</p>
+                    {!siteLoaded && siteResource.error ? (
+                      <p className="auth-gate-note" role="status">注册设置暂时没读到，已按默认方式（仅图片验证码）继续，你可以先填写表单。</p>
                     ) : closed ? (
                       <p className="form-error" role="status">本站已关闭注册。</p>
                     ) : null}
@@ -597,7 +602,7 @@ export default function Auth({ onAuthed, theme, onTheme, font, onFont, initialMo
                 <button
                   type="submit"
                   className="btn btn-primary btn-block btn-lg auth-submit"
-                  disabled={busy || (registering && (!site || closed || !captcha))}
+                  disabled={busy || (registering && (closed || !captcha))}
                   aria-busy={busy}
                 >
                   {busy ? <Spinner size={16} /> : <Icon name={registering ? 'plus' : 'arrowRight'} size={18} />}
