@@ -183,7 +183,9 @@ select:focus,
 .auth-hero, .auth-logo-stage, .auth-brand-logo { animation: m-rise var(--m-slow) var(--m-ease) both !important; }
 .auth-logo-stage { animation-delay: 80ms !important; }
 .auth-card { animation: m-rise var(--m-slow) var(--m-ease) both !important; animation-delay: 120ms !important; }
-.auth-card-top, .auth-tabs, .auth-tab-glider { animation: m-rise var(--m-mid) var(--m-ease) both !important; animation-delay: 180ms !important; }
+.auth-card-top, .auth-tabs { animation: m-rise var(--m-mid) var(--m-ease) both !important; animation-delay: 180ms !important; }
+/* 滑块 auth-tab-glider 不能用 m-rise：其 to{transform:none} 会覆盖 translateX(100%)，
+   让注册态滑块停在登录位置不动。它只用 auth-layout.css 自带的 transform transition。 */
 .auth-mode-form, .auth-submit, .auth-email-action { animation: m-rise var(--m-mid) var(--m-ease) both !important; animation-delay: 240ms !important; }
 .auth-field, .field { animation: m-rise var(--m-mid) var(--m-ease) both !important; }
 .field:nth-child(1) { animation-delay: 280ms !important; }
