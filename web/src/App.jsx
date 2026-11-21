@@ -98,7 +98,7 @@ export default function App() {
   useEffect(() => {
     if (!token || session?.token === token) return undefined;
     const controller = new AbortController();
-    api('/api/me', { token, signal: controller.signal, timeoutMs: 6000 })
+    api('/api/me', { token, signal: controller.signal, timeoutMs: 15000 })
       .then((data) => {
         if (controller.signal.aborted) return;
         if (!data?.account) throw new Error('会话信息读取失败，请重试');

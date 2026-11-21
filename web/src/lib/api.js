@@ -87,7 +87,7 @@ export function apiUrl(path) {
 }
 
 /* ---------- 网络 ---------- */
-export async function api(path, { method = 'GET', body, token, signal, timeoutMs } = {}) {
+export async function api(path, { method = 'GET', body, token, signal, timeoutMs, silent = false } = {}) {
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   let payload;
@@ -115,7 +115,8 @@ export async function api(path, { method = 'GET', body, token, signal, timeoutMs
   } catch (err) {
     // 页面离开、搜索换词造成的取消，不是掉线。
     if (signal?.aborted) throw err;
-    netFail(expired ? '请求超时' : '连不上服务器，正在重试');
+    // 后台轮询（silent）抖动一次就弹「连接已断开」会吓到用户：那些请求失败不进全站横幅。
+    if (!silent) netFail(expired ? '请求超时' : '连不上服务器，正在重试');
     const error = new Error(expired ? '请求超时，请稍后重试' : '网络连接失败，请稍后重试');
     error.code = expired ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR';
     throw error;
@@ -125,7 +126,7 @@ export async function api(path, { method = 'GET', body, token, signal, timeoutMs
   }
   if (!res.ok) {
     const code = typeof data?.code === 'string' ? data.code : undefined;
-    if (res.status >= 500 && !code?.startsWith('SMTP_')) netFail(data?.error || `服务器开小差（${res.status}）`);
+    if (res.status >= 500 && !code?.startsWith('SMTP_') && !silent) netFail(data?.error || `服务器开小差（${res.status}）`);
     else netOk();
     const error = new Error(data?.error || `请求失败（${res.status}）`);
     error.status = res.status;

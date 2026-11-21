@@ -52,22 +52,22 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
 
   const refreshConversations = useCallback(async (silent = true) => {
     try {
-      const data = await api('/api/conversations', { token });
+      const data = await api('/api/conversations', { token, silent });
       const list = (data.conversations || []).slice();
       setConvs(list);
-      convDelayRef.current = 4000;
+      convDelayRef.current = 8000;
       return list;
     } catch (err) {
       if (!silent) toast(err.message, 'error');
       setConvs((prev) => prev || []);
-      convDelayRef.current = Math.min(Math.max(convDelayRef.current, 4000) * 2, 15000);
+      convDelayRef.current = Math.min(Math.max(convDelayRef.current, 8000) * 2, 30000);
       return [];
     }
   }, [token]);
 
   const refreshNotifications = useCallback(async () => {
     try {
-      const data = await api('/api/notifications', { token });
+      const data = await api('/api/notifications', { token, silent: true });
       setNotifs(normalizeNotifications(data));
     } catch {
       /* 通知接口不可用时静默 */
@@ -96,8 +96,8 @@ export default function Shell({ token, me, accounts, theme, onTheme, font, onFon
       if (stopped) return;
       timer = window.setTimeout(tick, convDelayRef.current);
     };
-    timer = window.setTimeout(tick, 4000);
-    const t2 = window.setInterval(() => refreshNotifications(), 15000);
+    timer = window.setTimeout(tick, 8000);
+    const t2 = window.setInterval(() => refreshNotifications(), 30000);
     const onWake = () => {
       if (stopped || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return;
       if (timer) window.clearTimeout(timer);

@@ -24,7 +24,7 @@ export default function PlazaPage({ onLogin, onRegister }) {
     if (!background) setFailure('');
     try {
       const params = new URLSearchParams({ q: keyword, limit: '60' });
-      const data = await api('/api/bots/public?' + params, { signal: controller.signal, timeoutMs: 6500 });
+      const data = await api('/api/bots/public?' + params, { signal: controller.signal, timeoutMs: 15000, silent: background });
       if (controller.signal.aborted || query.current !== keyword) return;
       setBots(data.bots || []);
       setNote(data.note || '');
@@ -42,7 +42,7 @@ export default function PlazaPage({ onLogin, onRegister }) {
     load('');
     const id = window.setInterval(() => {
       if (!document.hidden && timerRef.current === null) load(query.current, true);
-    }, 20000);
+    }, 30000);
     return () => {
       window.clearInterval(id);
       window.clearTimeout(timerRef.current);
